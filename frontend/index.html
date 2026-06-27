@@ -21,6 +21,19 @@
     border-bottom: 1px solid #e0e7ff;
     padding-bottom: 0.4rem;
   }
+  .template-box {
+    background: #f8faff;
+    border: 1px solid #c7d2fe;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.75rem;
+    color: #4338ca;
+    line-height: 1.8;
+    white-space: pre-wrap;
+    cursor: pointer;
+    user-select: all;
+  }
+  .template-box:hover { background: #eef2ff; }
 </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -36,14 +49,14 @@
 
 <main class="max-w-2xl mx-auto px-4 py-10">
 
-  <!-- 說明卡片 -->
+  <!-- 袪明卡片 -->
   <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-5 mb-8 text-sm text-indigo-900">
     <b>使用方式：</b>上傳你的專案規劃文件（Word 或 Excel），系統會自動對照 William 老師的
     <b>437 筆檢核項目</b>，找出落差並生成補件清單。<br>
     評分達 <b>70 分</b>以上才可以找老師開會。
   </div>
 
-  <!-- 上傳表單 -->
+  <!-- $��傳表單 -->
   <div class="bg-white rounded-2xl shadow p-8 space-y-6">
 
     <!-- ① 基本資訊 -->
@@ -65,21 +78,36 @@
       </div>
     </div>
 
-    <!-- ② 學員說明（重要！AI 會納入考量） -->
+    <!-- ② 學員說明 -->
     <div>
       <div class="section-title">&#9313; 說明你的需求與想法 <span class="text-red-400">&#9733; 越詳細越準確</span></div>
       <label class="block text-sm text-gray-600 mb-2">
-        告訴 AI 你這次的背景、目標、已經做了什麼、擔心哪些地方。AI 會結合你的說明一起判斷落差。
+        照下方模板填寫，複製後貼入並填入你的內容。AI 會根據你的說明一起判斷落差。
       </label>
-      <textarea id="contextInput" rows="6"
-        placeholder="例如：&#10;我是第一次主辦生活營，預計在7月底舉辦，目前已確認場地和大部分師資。&#10;我最擔心的是安全備案和家長溝通部分還沒準備好。&#10;這次活動對象是青少年，預計30人，需要特別注意未成年相關規定。&#10;希望 AI 特別幫我看這些弱點，以及我可能忽略的地方。"
-        class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-y leading-relaxed"></textarea>
-      <p class="text-xs text-gray-400 mt-1">不一定要上傳檔案，若你還沒有規劃文件，可以只靠這裡的說明讓 AI 先給你初步檢核建議。</p>
+
+      <!-- 可複製模板 -->
+      <div class="mb-3">
+        <p class="text-xs text-gray-400 mb-1">&#128203; 點擊複製對話模板，貼入下方後填寫</p>
+        <div class="template-box" onclick="copyTemplate()" title="點擊複製">
+1. 我的組別／角色：
+2. 需要 AI 幫我檢核的內容：
+3. 這份規劃的目標：
+4. 這份規劃的內容：
+5. 我目前的想法是什麼：
+6. 鍾老師／宏濬學長的要求是什麼：
+7. 其他補充：</div>
+        <p id="copyMsg" class="text-xs text-green-500 mt-1 hidden">&#10003; 已複製！請貼入下方文字框</p>
+      </div>
+
+      <textarea id="contextInput" rows="10"
+        placeholder="請將模板貼入此處並填寫各項內容..."
+        class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-y leading-relaxed font-mono"></textarea>
+      <p class="text-xs text-gray-400 mt-1">不一定要上傳檔案，只填寫說明也可以讓 AI 先給你初步檢核建議。</p>
     </div>
 
     <!-- ③ 上傳規劃文件（可選） -->
     <div>
-      <div class="section-title">&#9314; 上傳規劃文件 <span class="text-gray-400 font-normal">（可選）</span></div>
+      <div class="section-title">&#9314; $��傳規劃文件 <span class="text-gray-400 font-normal">（可選）</span></div>
       <div id="dropZone"
         class="drop-zone rounded-xl p-8 text-center cursor-pointer"
         onclick="document.getElementById('fileInput').click()">
@@ -100,47 +128,31 @@
     <!-- ④ AI 設定 -->
     <div>
       <div class="section-title">&#9315; AI 設定</div>
-      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">
-            Gemini API Key
-            <span class="text-gray-400 font-normal text-xs ml-1">（只存在你的瀏覽器）</span>
-          </label>
-          <div class="relative">
-            <input id="geminiApiKey" type="password"
-              placeholder="AIza... 或留空使用伺服器預設"
-              class="w-full border border-gray-300 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
-            <button onclick="toggleApiKeyVisibility()"
-              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-              &#128065;
-            </button>
-          </div>
-          <p class="text-xs text-gray-400 mt-1">
-            <a href="https://aistudio.google.com/apikey" target="_blank" class="text-indigo-500 hover:underline">
-              點此取得 Google AI Studio API Key &rarr;
-            </a>
-          </p>
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">
+          Gemini API Key
+          <span class="text-gray-400 font-normal text-xs ml-1">（只存在你的瀏覽器）</span>
+        </label>
+        <div class="relative">
+          <input id="geminiApiKey" type="password"
+            placeholder="AIza... 或留空使用伺服器預設"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+          <button onclick="toggleApiKeyVisibility()"
+            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
+            &#128065;
+          </button>
         </div>
-
-        <div>
-          <label class="block text-sm font-medium text-gray-700 mb-1">Gemini 模型</label>
-          <select id="geminiModel"
-            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white">
-            <option value="gemini-2.0-flash-latest" selected>gemini-2.0-flash-latest (推薦)</option>
-            <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview (更強)</option>
-            <option value="gemini-2.5-pro-preview-06-05">gemini-2.5-pro-preview (最強)</option>
-            <option value="gemini-1.5-flash">gemini-1.5-flash (快速)</option>
-            <option value="gemini-1.5-pro">gemini-1.5-pro (穩定)</option>
-          </select>
-          <p class="text-xs text-gray-400 mt-1">Flash 系列速度快、Pro 系列準確度較高</p>
-        </div>
-
+        <p class="text-xs text-gray-400 mt-1">
+          <a href="https://aistudio.google.com/apikey" target="_blank" class="text-indigo-500 hover:underline">
+            點此取得 Google AI Studio API Key &rarr;
+          </a>
+          &nbsp;|&nbsp; 使用模型：gemini-flash-latest（自動選最新）
+        </p>
       </div>
-      <!-- 記住設定 -->
+      <!-- 蠘住設定 -->
       <div class="mt-3 flex items-center gap-2">
         <input type="checkbox" id="rememberSettings" class="rounded" checked>
-        <label for="rememberSettings" class="text-xs text-gray-500">記住我的 API Key 和模型選擇（儲存在本機 localStorage）</label>
+        <label for="rememberSettings" class="text-xs text-gray-500">記住我的 API Key（儲存在本機 localStorage）</label>
       </div>
     </div>
 
@@ -167,6 +179,26 @@
 </main>
 
 <script>
+const TEMPLATE = `1. 我的組別／角色：
+2. 需要 AI 幫我檢核的內容：
+3. 這份規劃的目標：
+4. 這份規劃的內容：
+5. 我目前的想法是什麼：
+6. 鍾老師／宏濬學長的要求是什麼：
+7. 其他補充：`;
+
+function copyTemplate() {
+  navigator.clipboard.writeText(TEMPLATE).then(() => {
+    const msg = document.getElementById('copyMsg');
+    msg.classList.remove('hidden');
+    setTimeout(() => msg.classList.add('hidden'), 3000);
+  }).catch(() => {
+    // fallback: 直接填入 textarea
+    const ta = document.getElementById('contextInput');
+    if (!ta.value.trim()) ta.value = TEMPLATE;
+  });
+}
+
 // ── 載入場景清單 ──
 fetch('/api/scenes').then(r => r.json()).then(data => {
   const sel = document.getElementById('sceneSelect');
@@ -179,10 +211,8 @@ fetch('/api/scenes').then(r => r.json()).then(data => {
 
 // ── 還原儲存設定 ──
 window.addEventListener('DOMContentLoaded', () => {
-  const savedKey   = localStorage.getItem('gemini_api_key');
-  const savedModel = localStorage.getItem('gemini_model');
-  if (savedKey)   document.getElementById('geminiApiKey').value = savedKey;
-  if (savedModel) document.getElementById('geminiModel').value  = savedModel;
+  const savedKey = localStorage.getItem('gemini_api_key');
+  if (savedKey) document.getElementById('geminiApiKey').value = savedKey;
 });
 
 // ── Toggle API Key 可見度 ──
@@ -193,8 +223,8 @@ function toggleApiKeyVisibility() {
 
 // ── 拖放處理 ──
 let selectedFile = null;
-const dropZone   = document.getElementById('dropZone');
-const fileInput  = document.getElementById('fileInput');
+const dropZone  = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
 
 dropZone.addEventListener('dragover', e => {
   e.preventDefault();
@@ -224,28 +254,24 @@ async function submitCheck() {
   const sceneHint    = document.getElementById('sceneSelect').value;
   const contextInput = document.getElementById('contextInput').value.trim();
   const apiKey       = document.getElementById('geminiApiKey').value.trim();
-  const model        = document.getElementById('geminiModel').value;
   const remember     = document.getElementById('rememberSettings').checked;
 
   if (!selectedFile && !contextInput) {
-    showError('請上傳規劃文件，或在「說明你的需求與想法」欄位填入內容');
+    showError('&#35531;&#19978;&#20傳&#35215;&#21000;&#25991;&#20214;&#65292;&#25110;&#22312;&#12300;&#35498;&#26126;&#12301;&#26041;&#22856;&#22586;&#20837;&#20839;&#23481;');
     return;
   }
 
-  if (remember) {
-    if (apiKey) localStorage.setItem('gemini_api_key', apiKey);
-    localStorage.setItem('gemini_model', model);
-  }
+  if (remember && apiKey) localStorage.setItem('gemini_api_key', apiKey);
 
   setLoading(true);
   hideError();
 
   const fd = new FormData();
   if (selectedFile) fd.append('file', selectedFile);
-  fd.append('member_name',    memberName);
-  fd.append('scene_hint',     sceneHint);
-  fd.append('context_input',  contextInput);
-  fd.append('gemini_model',   model);
+  fd.append('member_name',   memberName);
+  fd.append('scene_hint',    sceneHint);
+  fd.append('context_input', contextInput);
+  fd.append('gemini_model',  'gemini-flash-latest');
   if (apiKey) fd.append('gemini_api_key', apiKey);
 
   const tips = [
@@ -283,7 +309,7 @@ function setLoading(on) {
 }
 function showError(msg) {
   const el = document.getElementById('errorMsg');
-  el.textContent = msg;
+  el.innerHTML = msg;
   el.classList.remove('hidden');
 }
 function hideError() {
