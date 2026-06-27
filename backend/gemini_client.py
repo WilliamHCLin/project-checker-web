@@ -35,7 +35,7 @@ def build_prompt(
             f"  被提及次數：{it['mention_count']}\n"
         )
 
-    return f"""你是 William 者師的專案檢核 AI 助理。
+    return f"""你是 William 老師的專案檢核 AI 助理。
 你的任務是分析 member 上傳的規劃文件，對照 William 的檢核資料庫，找出落差並提供建議。
 
 ═══════════════════════════════════════
@@ -71,11 +71,11 @@ def build_prompt(
    - 部分完成：有做但缺關鍵資訊
    - 未完成：完全沒有或嚴重不足
    - 不適用：本案不涉及此項目
-   - 需補件．缺具體資料，可由 member 補填
+   - 需補件：缺具體資料，可由 member 補填
    - 需確認：資料矛盾或模糊
 3. 常見錯誤偵測：依「常見錯誤」欄的說明，特別標記發現的問題
 4. 具體建議：對「需補件」和「部分完成」的項目，給出 William 風格的具體補件建議
-   （風格：直接、具體，用「你需要補：XXX 格式」，不說「請考慮」「可能需要」筅渊詞）
+   （風格：直接、具體，用「你需要補：XXX 格式」，不說「請考慮」「可能需要」等模糊詞）
 
 請嚴格以 JSON 格式輸出（不要加 markdown code block）：
 {{
@@ -122,16 +122,4 @@ def analyze(
             model=effective_model,
             contents=prompt,
             config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=8192,
-            ),
-        )
-
-        raw_text = resp.text
-        # Clean up markdown code fences if present
-        raw_text = re.sub(r'```json\n?', '', raw_text)
-        raw_text = re.sub(r'```\n?', '', raw_text)
-
-        return json.loads(roow_text)
-    except Exception as e:
-        return {"error": str(e)}
+           
