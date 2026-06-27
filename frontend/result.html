@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>檢核結果 — 生命動能協會</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  .result-tag { @apply text-xs font-bold px-2 py-0.5 rounded-full; }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<header class="bg-indigo-800 text-white px-6 py-4 flex items-center justify-between shadow">
+  <div>
+    <h1 class="text-xl font-bold">📋 檢核結果</h1>
+    <p id="headerMeta" class="text-indigo-200 text-sm"></p>
+  </div>
+  <a href="/" class="text-indigo-300 hover:text-white text-sm">← 重新上傳</a>
+</header>
+
+<main class="max-w-4xl mx-auto px-4 py-8">
+
+  <!-- 評分摘要 -->
+  <div id="scoreBanner" class="rounded-2xl p-6 mb-6 shadow text-white">
+    <div class="flex items-center justify-between flex-wrap gap-4">
+      <div>
+        <p class="text-sm opacity-80">TC4 綜合評分</p>
+        <p id="scoreDisplay" class="text-5xl font-black"></p>
+        <p id="scoreSubtitle" class="text-sm mt-1 opacity-90"></p>
+      </div>
+      <div class="text-right">
+        <p id="sceneDisplay" class="font-medium"></p>
+        <p id="levelDisplay" class="text-sm opacity-80 mt-1"></p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 統計列 -->
+  <div id="statsRow" class="grid grid-cols-3 sm:grid-cols-6 gap-3 mb-6"></div>
+
+  <!-- 整體評語 -->
+  <div id="commentBox" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-5 mb-6">
+    <p class="font-bold text-amber-800 mb-1">💬 William 整體評語</p>
+    <p id="commentText" class="text-amber-900 text-sm"></p>
+  </div>
+
+  <!-- 下載按鈕 -->
+  <div id="downloadRow" class="flex gap-3 mb-8">
+    <a id="downloadWord" href="#" target="_blank"
+      class="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white text-center py-3 rounded-xl font-bold text-sm transition">
+      📄 下載補填版 Word
+    </a>
+    <a id="downloadHtml" href="#" target="_blank"
+      class="flex-1 bg-gray-700 hover:bg-gray-800 text-white text-center py-3 rounded-xl font-bold text-sm transition">
+      🖨️ 開啟 PDF 版（列印）
+    </a>
+  </div>
+
+  <!-- 篩選器 -->
+  <div class="flex gap-2 flex-wrap mb-4" id="filterBtns">
+    <button onclick="filterItems('all')"
+      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-indigo-700 text-white">全部</button>
+    <button onclick="filterItems('需補件')"
+      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700">需補件</button>
+    <button onclick="filterItems('部分完成')"
+      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700">部分完成</button>
+    <button onclick="filterItems('未完成')"
+      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700">未完成</button>
+    <button onclick="filterItems('已完成')"
+      class="filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700">已完成</button>
+  </div>
+
+  <!-- 逐項清單 -->
+  <div id="itemsList" class="space-y-3"></div>
+
+</main>
+
+<script>
+const RESULT_CONFIG = {
+  "已完成":   { bg:"bg-green-50",  border:"border-green-200",  tag:"bg-green-100 text-green-800",  emoji:"✅" },
+  "部分完成": { bg:"bg-yellow-50", border:"border-yellow-200", tag:"bg-yellow-100 text-yellow-800", emoji:"⚠️" },
+  "未完成":   { bg:"bg-red-50",    border:"border-red-200",    tag:"bg-red-100 text-red-800",       emoji:"❌" },
+  "需補件":   { bg:"bg-blue-50",   border:"border-blue-200",   tag:"bg-blue-100 text-blue-800",     emoji:"📋" },
+  "需確認":   { bg:"bg-purple-50", border:"border-purple-200", tag:"bg-purple-100 text-purple-800", emoji:"❓" },
+  "不適用":   { bg:"bg-gray-50",   border:"border-gray-200",   tag:"bg-gray-100 text-gray-600",     emoji:"—"  },
+};
+const STAT_LABELS = {
+  "已完成":"✅","部分完成":"⚠️","未完成":"❌","需補件":"📋","需確認":"❓","不適用":"—"
+};
+
+let allItems = [];
+
+// ── 載入資料 ──
+async function loadResult() {
+  const params  = new URLSearchParams(location.search);
+  const checkId = params.get('id');
+
+  let data = null;
+  const cached = sessionStorage.getItem('checkResult');
+  if (cached) {
+    const parsed = JSON.parse(cached);
+    if (parsed.check_id === checkId) data = parsed;
+  }
+  if (!data && checkId) {
+    const resp = await fetch(`/api/result/${checkId}`);
+    if (resp.ok) data = await resp.json();
+  }
+  if (!data) {
+    document.body.innerHTML = '<div class="p-10 text-center text-red-600">找不到檢核記錄，請重新上傳。<br><a href="/" class="underline">回首頁</a></div>';
+    return;
+  }
+
+  renderResult(data);
+}
+
+function renderResult(data) {
+  const checkId = data.check_id;
+  allItems = data.items || [];
+
+  // Header meta
+  document.getElementById('headerMeta').textContent =
+    `${data.member_name || '（未填）'} · ${data.filename || ''} · ${(data.timestamp||'').slice(0,10)}`;
+
+  // 評分 banner
+  const passed = data.passed;
+  const score  = data.score;
+  const banner = document.getElementById('scoreBanner');
+  banner.className = `rounded-2xl p-6 mb-6 shadow text-white ${passed ? 'bg-green-700' : 'bg-red-700'}`;
+  document.getElementById('scoreDisplay').textContent = `${score} 分`;
+  document.getElementById('scoreSubtitle').textContent =
+    passed ? '✅ 達到開會門檻！可以找 William 老師開會' : `❌ 未達開會門檻（需 70 分）`;
+  document.getElementById('sceneDisplay').textContent = data.scene || '';
+  document.getElementById('levelDisplay').textContent = `${data.level || ''} 級專案`;
+
+  // 統計
+  const statsRow = document.getElementById('statsRow');
+  statsRow.innerHTML = '';
+  Object.entries(data.stats || {}).forEach(([k, v]) => {
+    statsRow.innerHTML += `
+      <div class="bg-white rounded-xl p-3 text-center shadow-sm">
+        <p class="text-xl">${STAT_LABELS[k] || k}</p>
+        <p class="text-2xl font-black text-gray-800">${v}</p>
+        <p class="text-xs text-gray-500">${k}</p>
+      </div>`;
+  });
+
+  // 評語
+  if (data.overall_comment) {
+    document.getElementById('commentBox').classList.remove('hidden');
+    document.getElementById('commentText').textContent = data.overall_comment;
+  }
+
+  // 下載連結
+  document.getElementById('downloadWord').href = `/api/report/${checkId}/word`;
+  document.getElementById('downloadHtml').href = `/api/report/${checkId}/html`;
+
+  // 清單
+  renderItems(allItems);
+}
+
+function renderItems(items) {
+  const list = document.getElementById('itemsList');
+  list.innerHTML = '';
+  items.forEach(it => {
+    const cfg     = RESULT_CONFIG[it.result] || RESULT_CONFIG["不適用"];
+    const missing = (it.missing || []).map(m => `<li>${m}</li>`).join('');
+    const missingBlock = missing
+      ? `<div class="mt-2 text-sm"><b class="text-blue-700">需補充：</b><ul class="list-disc list-inside text-blue-900 mt-1">${missing}</ul></div>` : '';
+    const suggBlock = it.suggestion
+      ? `<div class="mt-2 text-sm bg-amber-50 rounded p-2"><b class="text-amber-700">💡 建議：</b> ${it.suggestion}</div>` : '';
+    const errBlock = it.common_error_found
+      ? `<div class="mt-2 text-xs text-red-600">⚠️ 常見錯誤偵測：${it.common_error_found}</div>` : '';
+
+    list.innerHTML += `
+      <div class="item-card ${cfg.bg} border ${cfg.border} rounded-xl p-4" data-result="${it.result}">
+        <div class="flex items-start justify-between gap-2">
+          <p class="font-semibold text-gray-800 text-sm">
+            ${cfg.emoji} <span class="text-gray-400 text-xs mr-1">序${it.seq}</span>${it.item}
+          </p>
+          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${cfg.tag}">${it.result}</span>
+        </div>
+        ${it.evidence && it.evidence !== '文件未提及'
+          ? `<p class="text-xs text-gray-500 mt-1 italic">"${it.evidence}"</p>` : ''}
+        ${missingBlock}${suggBlock}${errBlock}
+      </div>`;
+  });
+}
+
+function filterItems(result) {
+  // 更新按鈕樣式
+  document.querySelectorAll('.filter-btn').forEach(btn => {
+    btn.className = 'filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-gray-200 text-gray-700';
+  });
+  event.target.className = 'filter-btn px-4 py-1.5 rounded-full text-sm font-medium bg-indigo-700 text-white';
+
+  const filtered = result === 'all' ? allItems : allItems.filter(i => i.result === result);
+  renderItems(filtered);
+}
+
+loadResult();
+</script>
+</body>
+</html>

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>專案檢核系統 — 生命動能協會</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+  .drop-zone { border: 2px dashed #6366f1; transition: all .2s; }
+  .drop-zone.drag-over { background: #eef2ff; border-color: #4338ca; }
+  .spinner { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+<!-- Header -->
+<header class="bg-indigo-800 text-white px-6 py-4 flex items-center justify-between shadow">
+  <div>
+    <h1 class="text-xl font-bold">📋 專案檢核系統</h1>
+    <p class="text-indigo-200 text-sm">生命動能協會 · William 老師的要求資料庫</p>
+  </div>
+  <a href="/admin" class="text-indigo-300 hover:text-white text-sm">管理頁面 →</a>
+</header>
+
+<main class="max-w-2xl mx-auto px-4 py-10">
+
+  <!-- 說明卡片 -->
+  <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-5 mb-8 text-sm text-indigo-900">
+    <b>使用方式：</b>上傳你的專案規劃文件（Word 或 Excel），系統會自動對照 William 老師的
+    <b>437 筆檢核項目</b>，找出落差並生成補件清單。<br>
+    評分達 <b>70 分</b>以上才可以找老師開會。
+  </div>
+
+  <!-- 上傳表單 -->
+  <div class="bg-white rounded-2xl shadow p-8">
+    <h2 class="text-lg font-bold text-gray-800 mb-6">上傳規劃文件</h2>
+
+    <!-- 姓名 -->
+    <div class="mb-5">
+      <label class="block text-sm font-medium text-gray-700 mb-1">你的名字</label>
+      <input id="memberName" type="text" placeholder="王小明"
+        class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+    </div>
+
+    <!-- 場景選擇 -->
+    <div class="mb-5">
+      <label class="block text-sm font-medium text-gray-700 mb-1">
+        使用場景 <span class="text-gray-400 font-normal">（留空則自動辨識）</span>
+      </label>
+      <select id="sceneSelect"
+        class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white">
+        <option value="">🔍 自動辨識</option>
+      </select>
+    </div>
+
+    <!-- 拖放區 -->
+    <div id="dropZone"
+      class="drop-zone rounded-xl p-10 text-center cursor-pointer mb-6"
+      onclick="document.getElementById('fileInput').click()">
+      <div id="dropContent">
+        <div class="text-4xl mb-3">📄</div>
+        <p class="font-medium text-gray-700">拖放檔案到這裡，或點擊選擇</p>
+        <p class="text-sm text-gray-400 mt-1">支援 .docx（Word）、.xlsx（Excel），最大 10MB</p>
+      </div>
+      <div id="fileChosen" class="hidden">
+        <div class="text-4xl mb-2">✅</div>
+        <p id="fileName" class="font-medium text-indigo-700"></p>
+        <p class="text-sm text-gray-400 mt-1">點擊可更換檔案</p>
+      </div>
+    </div>
+    <input id="fileInput" type="file" accept=".docx,.xlsx" class="hidden">
+
+    <!-- 送出按鈕 -->
+    <button id="submitBtn" onclick="submitCheck()"
+      class="w-full bg-indigo-700 hover:bg-indigo-800 text-white font-bold py-3 rounded-xl transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+      <span id="btnText">開始檢核</span>
+    </button>
+
+    <!-- 錯誤訊息 -->
+    <div id="errorMsg" class="hidden mt-4 bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm"></div>
+  </div>
+
+  <!-- 進度顯示 -->
+  <div id="progressCard" class="hidden bg-white rounded-2xl shadow p-8 mt-6 text-center">
+    <svg class="spinner w-10 h-10 text-indigo-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+    </svg>
+    <p class="font-medium text-gray-700" id="progressText">正在分析文件，請稍候…</p>
+    <p class="text-sm text-gray-400 mt-1">Gemini 正在對照 437 筆檢核項目</p>
+  </div>
+
+</main>
+
+<script>
+// ── 載入場景清單 ──
+fetch('/api/scenes').then(r => r.json()).then(data => {
+  const sel = document.getElementById('sceneSelect');
+  data.scenes.forEach(s => {
+    const opt = document.createElement('option');
+    opt.value = s; opt.textContent = s;
+    sel.appendChild(opt);
+  });
+}).catch(() => {});
+
+// ── 拖放處理 ──
+let selectedFile = null;
+const dropZone   = document.getElementById('dropZone');
+const fileInput  = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const f = e.dataTransfer.files[0];
+  if (f) setFile(f);
+});
+fileInput.addEventListener('change', () => {
+  if (fileInput.files[0]) setFile(fileInput.files[0]);
+});
+
+function setFile(f) {
+  selectedFile = f;
+  document.getElementById('dropContent').classList.add('hidden');
+  document.getElementById('fileChosen').classList.remove('hidden');
+  document.getElementById('fileName').textContent = f.name;
+}
+
+// ── 送出 ──
+async function submitCheck() {
+  if (!selectedFile) {
+    showError('請先選擇檔案');
+    return;
+  }
+  const memberName = document.getElementById('memberName').value.trim();
+  const sceneHint  = document.getElementById('sceneSelect').value;
+
+  setLoading(true);
+  hideError();
+
+  const fd = new FormData();
+  fd.append('file', selectedFile);
+  fd.append('member_name', memberName);
+  fd.append('scene_hint',  sceneHint);
+
+  try {
+    const resp = await fetch('/api/check', { method: 'POST', body: fd });
+    const data = await resp.json();
+
+    if (!resp.ok) throw new Error(data.detail || '檢核失敗');
+
+    // 存結果到 sessionStorage，跳轉到結果頁
+    sessionStorage.setItem('checkResult', JSON.stringify(data));
+    window.location.href = `/result.html?id=${data.check_id}`;
+  } catch (err) {
+    setLoading(false);
+    showError('❌ ' + err.message);
+  }
+}
+
+function setLoading(on) {
+  document.getElementById('submitBtn').disabled = on;
+  document.getElementById('btnText').textContent = on ? '分析中…' : '開始檢核';
+  document.getElementById('progressCard').classList.toggle('hidden', !on);
+}
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+}
+function hideError() {
+  document.getElementById('errorMsg').classList.add('hidden');
+}
+</script>
+</body>
+</html>

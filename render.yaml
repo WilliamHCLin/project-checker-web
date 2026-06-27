@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: project-checker-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: GEMINI_API_KEY
+        sync: false        # 在 Render 後台手動填入
+      - key: GEMINI_MODEL
+        value: gemini-2.0-flash-latest
+      - key: ADMIN_TOKEN
+        sync: false        # 在 Render 後台手動填入
+    healthCheckPath: /health
