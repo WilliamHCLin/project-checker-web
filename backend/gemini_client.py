@@ -12,8 +12,9 @@ from google.genai import types
 from config import GEMINI_API_KEY, GEMINI_MODEL
 
 
-def _get_client():
-    return genai.Client(api_key=GEMINI_API_KEY)
+def _get_client(api_key: str = None):
+    """若有傳入 api_key 則使用該 key，否則用伺服器預設。"""
+    return genai.Client(api_key=api_key or GEMINI_API_KEY)
 
 
 def build_prompt(
@@ -37,6 +38,8 @@ def build_prompt(
     return f"""你是 William 老師的專案檢核 AI 助理。
 你的任務是分析 member 上傳的規劃文件，對照 William 的檢核資料庫，找出落差並提供建議。
 
+【學員說明若有提供，請優先理解其背景、需求與擔憂，並在判斷時納入考量】
+
 ═══════════════════════════════════════
 【William 的決策框架與原則（節選）】
 ═══════════════════════════════════════
@@ -55,9 +58,9 @@ def build_prompt(
 {items_text}
 
 ═══════════════════════════════════════
-【Member 上傳的規劃文件】
+【Member 提供的內容】
 ═══════════════════════════════════════
-{doc_text[:8000]}
+{doc_text[:10000]}
 
 ═══════════════════════════════════════
 【你的任務】
@@ -103,17 +106,22 @@ def analyze(
     level: str,
     check_items: list[dict],
     skill_context: str,
+    api_key: str = None,
+    model_override: str = None,
 ) -> dict:
     """呼叫 Gemini，回傳解析後的 dict。"""
-    if not GEMINI_API_KEY:
-        return {"error": "GEMINI_API_KEY 未設定"}
+    effective_key   = api_key or GEMINI_API_KEY
+    effective_model = model_override or GEMINI_MODEL
+
+    if not effective_key:
+        return {"error": "GEMINI_API_KEY 未設定，請在頁面的「AI 設定」欄填入你的 API Key"}
 
     try:
-        client = _get_client()
+        client = _get_client(effective_key)
         prompt = build_prompt(doc_text, scene, level, check_items, skill_context)
 
         resp = client.models.generate_content(
-            model=GEMINI_MODEL,
+            model=effective_model,
             contents=prompt,
             config=types.GenerateContentConfig(
                 temperature=0.2,
@@ -125,7 +133,7 @@ def analyze(
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
-            cleaned = re.sub(r"```(?:json)?|```", "", raw).strip()
+            cleaned = re.sub(r"```(?:json)?```", "", raw).strip()
             return json.loads(cleaned)
 
     except Exception as e:
