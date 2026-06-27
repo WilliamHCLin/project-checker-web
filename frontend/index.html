@@ -107,22 +107,22 @@
 
     <!-- ③ 上傳規劃文件（可選） -->
     <div>
-      <div class="section-title">&#9314; 上傳規劃文件 <span class="text-gray-400 font-normal">（可選）</span></div>
+      <div class="section-title">&#9314; 上傳規劃文件 <span class="text-gray-400 font-normal">（可選，可多檔）</span></div>
       <div id="dropZone"
         class="drop-zone rounded-xl p-8 text-center cursor-pointer"
         onclick="document.getElementById('fileInput').click()">
         <div id="dropContent">
           <div class="text-3xl mb-2">&#128196;</div>
           <p class="font-medium text-gray-700 text-sm">拖放檔案到這裡，或點擊選擇</p>
-          <p class="text-xs text-gray-400 mt-1">支援 .docx（Word）、.xlsx（Excel），最大 10MB</p>
+          <p class="text-xs text-gray-400 mt-1">支援 .docx（Word）、.xlsx（Excel），可一次選多個，最大每檔 10MB</p>
         </div>
         <div id="fileChosen" class="hidden">
           <div class="text-3xl mb-2">&#10003;</div>
-          <p id="fileName" class="font-medium text-indigo-700 text-sm"></p>
-          <p class="text-xs text-gray-400 mt-1">點擊可更換檔案</p>
+          <div id="fileList" class="text-left mt-2 space-y-1"></div>
+          <p class="text-xs text-gray-400 mt-2">點擊可重新選擇</p>
         </div>
       </div>
-      <input id="fileInput" type="file" accept=".docx,.xlsx" class="hidden">
+      <input id="fileInput" type="file" accept=".docx,.xlsx" multiple class="hidden">
     </div>
 
     <!-- ④ AI 設定 -->
@@ -239,8 +239,8 @@ function toggleApiKeyVisibility() {
   inp.type = inp.type === 'password' ? 'text' : 'password';
 }
 
-// ── 拖放處理 ──
-let selectedFile = null;
+// ── 拖放處理（多檔） ──
+let selectedFiles = [];
 const dropZone  = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 
@@ -252,18 +252,22 @@ dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-ove
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) setFile(f);
+  const files = Array.from(e.dataTransfer.files).filter(f => /\.(docx|xlsx)$/i.test(f.name));
+  if (files.length) setFiles(files);
 });
 fileInput.addEventListener('change', () => {
-  if (fileInput.files[0]) setFile(fileInput.files[0]);
+  const files = Array.from(fileInput.files);
+  if (files.length) setFiles(files);
 });
 
-function setFile(f) {
-  selectedFile = f;
+function setFiles(files) {
+  selectedFiles = files;
   document.getElementById('dropContent').classList.add('hidden');
   document.getElementById('fileChosen').classList.remove('hidden');
-  document.getElementById('fileName').textContent = f.name;
+  const listEl = document.getElementById('fileList');
+  listEl.innerHTML = files.map(f =>
+    `<p class="text-sm font-medium text-indigo-700">&#10003; ${f.name}</p>`
+  ).join('');
 }
 
 // ── 送出 ──
@@ -274,8 +278,8 @@ async function submitCheck() {
   const apiKey       = document.getElementById('geminiApiKey').value.trim();
   const remember     = document.getElementById('rememberSettings').checked;
 
-  if (!selectedFile && !contextInput) {
-    showError('&#35531;&#19978;&#20傳&#35215;&#21000;&#25991;&#20214;&#65292;&#25110;&#22312;&#12300;&#35498;&#26126;&#12301;&#26041;&#22856;&#22586;&#20837;&#20839;&#23481;');
+  if (!selectedFiles.length && !contextInput) {
+    showError('&#35531;&#19978;&#20659;&#27284;&#26696;&#65292;&#25110;&#22312;&#12300;&#35498;&#26126;&#12301;&#26041;&#22612;&#20837;&#20839;&#23481;');
     return;
   }
 
@@ -286,11 +290,54 @@ async function submitCheck() {
   hideError();
 
   const fd = new FormData();
-  if (selectedFile) fd.append('file', selectedFile);
+  selectedFiles.forEach(f => fd.append('files', f));
   fd.append('member_name',   memberName);
   fd.append('scene_hint',    sceneHint);
   fd.append('context_input', contextInput);
   fd.append('gemini_model',  document.getElementById('geminiModel').value);
   if (apiKey) fd.append('gemini_api_key', apiKey);
 
- 
+  const tips = [
+    'AI 正在閱讀你的文件…',
+    '對照 437 筆檢核項目中…',
+    '辨識場景與層級…',
+    '分析落差與缺口…',
+    '生成補件建議清單…',
+    '計算 TC4 評分…',
+  ];
+  let tipIdx = 0;
+  const tipTimer = setInterval(() => {
+    tipIdx = (tipIdx + 1) % tips.length;
+    document.getElementById('progressSub').textContent = tips[tipIdx];
+  }, 3000);
+
+  try {
+    const resp = await fetch('/api/check', { method: 'POST', body: fd });
+    const data = await resp.json();
+    clearInterval(tipTimer);
+    if (!resp.ok) throw new Error(data.detail || '檢核失敗');
+    sessionStorage.setItem('checkResult', JSON.stringify(data));
+    window.location.href = '/result.html?id=' + data.check_id;
+  } catch (err) {
+    clearInterval(tipTimer);
+    setLoading(false);
+    showError('&#10060; ' + err.message);
+  }
+}
+
+function setLoading(on) {
+  document.getElementById('submitBtn').disabled = on;
+  document.getElementById('btnText').textContent = on ? '分析中…' : '&#128269; 開始檢核';
+  document.getElementById('progressCard').classList.toggle('hidden', !on);
+}
+function showError(msg) {
+  const el = document.getElementById('errorMsg');
+  el.innerHTML = msg;
+  el.classList.remove('hidden');
+}
+function hideError() {
+  document.getElementById('errorMsg').classList.add('hidden');
+}
+</script>
+</body>
+</html>
