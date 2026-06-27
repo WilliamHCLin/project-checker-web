@@ -54,15 +54,11 @@ RESULT_SCORES = {
     "未完成":   0.0,
     "需補件":   0.0,
     "需確認":   0.0,
-    "不適用":   None,  # 不計入分母
+    "不適用":   None,
 }
 
 
 def calculate_tc4_score(items_result: list[dict], db_items: list[dict]) -> dict:
-    """
-    依 TC4 規則計算加權分數。
-    回傳 {"score": float, "passed": bool, "detail": list}
-    """
     db_map = {it["seq"]: it for it in db_items}
     weighted_sum = 0.0
     weight_total = 0.0
@@ -74,7 +70,7 @@ def calculate_tc4_score(items_result: list[dict], db_items: list[dict]) -> dict:
         base_score = RESULT_SCORES.get(result)
 
         if base_score is None:
-            continue  # 不適用，跳過
+            continue
 
         db_item = db_map.get(seq, {})
         mention = db_item.get("mention_count", 0)
@@ -109,24 +105,27 @@ def run_check(
     filename: str,
     scene_hint: str = "",
     member_name: str = "",
+    context_input: str = "",
+    gemini_api_key: str = None,
+    gemini_model: str = None,
 ) -> dict:
-    """
-    完整檢核流程：
-    1. 解析文件
-    2. 場景辨識（或用 hint 覆蓋）
-    3. 篩選適用檢核項目 + 萃取 skill context
-    4. 呼叫 Gemini
-    5. 計算 TC4 評分
-    6. 組合結果
-    """
     check_id  = str(uuid.uuid4())
     timestamp = datetime.now().isoformat()
 
-    # 1. 解析文件
-    doc_text = extract_text(file_bytes, filename)
+    # 1. 解析文件（可選）
+    doc_text = ""
+    if file_bytes and filename:
+        doc_text = extract_text(file_bytes, filename)
+
+    # 合併學員說明文字（放在文件內容前面）
+    if context_input.strip():
+        context_section = f"【學員說明與背景】\n{context_input.strip()}\n\n"
+        doc_text = context_section + doc_text
+
+    detect_text = doc_text if doc_text else context_input
 
     # 2. 場景辨識
-    auto_detect = detect_scene(doc_text)
+    auto_detect = detect_scene(detect_text)
     scene      = scene_hint if scene_hint else auto_detect["scene"]
     level      = auto_detect["level"]
     confidence = auto_detect["confidence"] if not scene_hint else 100
@@ -137,11 +136,13 @@ def run_check(
 
     # 4. 呼叫 Gemini
     gemini_result = gemini_client.analyze(
-        doc_text=doc_text,
-        scene=scene,
-        level=level,
-        check_items=db_items,
-        skill_context=skill_context,
+        doc_text      = doc_text,
+        scene         = scene,
+        level         = level,
+        check_items   = db_items,
+        skill_context = skill_context,
+        api_key       = gemini_api_key,
+        model_override= gemini_model,
     )
 
     if "error" in gemini_result:
@@ -160,18 +161,19 @@ def run_check(
              for r in ["已完成","部分完成","未完成","不適用","需補件","需確認"]}
 
     return {
-        "check_id":         check_id,
-        "timestamp":        timestamp,
-        "filename":         filename,
-        "member_name":      member_name,
-        "scene":            gemini_result.get("scene_confirmed", scene),
-        "level":            gemini_result.get("level_confirmed", level),
-        "scene_note":       gemini_result.get("scene_note", ""),
-        "auto_confidence":  confidence,
-        "score":            tc4["score"],
-        "passed":           tc4["passed"],
-        "stats":            stats,
-        "items":            items,
-        "overall_comment":  gemini_result.get("overall_comment", ""),
-        "total_db_items":   len(db_items),
+        "check_id":           check_id,
+        "timestamp":          timestamp,
+        "filename":           filename,
+        "member_name":        member_name,
+        "scene":              gemini_result.get("scene_confirmed", scene),
+        "level":              gemini_result.get("level_confirmed", level),
+        "scene_note":         gemini_result.get("scene_note", ""),
+        "auto_confidence":    confidence,
+        "score":              tc4["score"],
+        "passed":             tc4["passed"],
+        "stats":              stats,
+        "items":              items,
+        "overall_comment":    gemini_result.get("overall_comment", ""),
+        "total_db_items":     len(db_items),
+        "has_context_input":  bool(context_input.strip()),
     }
