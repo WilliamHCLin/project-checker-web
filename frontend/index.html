@@ -12,33 +12,20 @@
   .spinner { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .section-title {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: #6366f1;
-    text-transform: uppercase;
-    margin-bottom: 0.75rem;
-    border-bottom: 1px solid #e0e7ff;
-    padding-bottom: 0.4rem;
+    font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em;
+    color: #6366f1; text-transform: uppercase;
+    margin-bottom: 0.75rem; border-bottom: 1px solid #e0e7ff; padding-bottom: 0.4rem;
   }
   .template-box {
-    background: #f8faff;
-    border: 1px solid #c7d2fe;
-    border-radius: 0.5rem;
-    padding: 0.75rem 1rem;
-    font-size: 0.75rem;
-    color: #4338ca;
-    line-height: 1.8;
-    white-space: pre-wrap;
-    cursor: pointer;
-    user-select: all;
+    background: #f8faff; border: 1px solid #c7d2fe; border-radius: 0.5rem;
+    padding: 0.75rem 1rem; font-size: 0.75rem; color: #4338ca;
+    line-height: 1.8; white-space: pre-wrap; cursor: pointer; user-select: all;
   }
   .template-box:hover { background: #eef2ff; }
 </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
 
-<!-- Header -->
 <header class="bg-indigo-800 text-white px-6 py-4 flex items-center justify-between shadow">
   <div>
     <h1 class="text-xl font-bold">&#128203; 專案檢核系統</h1>
@@ -49,14 +36,12 @@
 
 <main class="max-w-2xl mx-auto px-4 py-10">
 
-  <!-- 說明卡片 -->
   <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-5 mb-8 text-sm text-indigo-900">
     <b>使用方式：</b>上傳你的專案規劃文件（Word 或 Excel），系統會自動對照 William 老師的
     <b>437 筆檢核項目</b>，找出落差並生成補件清單。<br>
     評分達 <b>70 分</b>以上才可以找老師開會。
   </div>
 
-  <!-- 上傳表單 -->
   <div class="bg-white rounded-2xl shadow p-8 space-y-6">
 
     <!-- ① 基本資訊 -->
@@ -84,12 +69,9 @@
       <label class="block text-sm text-gray-600 mb-2">
         照下方模板填寫，複製後貼入並填入你的內容。AI 會根據你的說明一起判斷落差。
       </label>
-
-      <!-- 可複製模板 -->
       <div class="mb-3">
         <p class="text-xs text-gray-400 mb-1">&#128203; 點擊複製對話模板，貼入下方後填寫</p>
-        <div class="template-box" onclick="copyTemplate()" title="點擊複製">
-1. 我的組別／角色：
+        <div class="template-box" onclick="copyTemplate()" title="點擊複製">1. 我的組別／角色：
 2. 需要 AI 幫我檢核的內容：
 3. 這份規劃的目標：
 4. 這份規劃的內容：
@@ -98,14 +80,13 @@
 7. 其他補充：</div>
         <p id="copyMsg" class="text-xs text-green-500 mt-1 hidden">&#10003; 已複製！請貼入下方文字框</p>
       </div>
-
       <textarea id="contextInput" rows="10"
         placeholder="請將模板貼入此處並填寫各項內容..."
         class="w-full border border-gray-300 rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm resize-y leading-relaxed font-mono"></textarea>
       <p class="text-xs text-gray-400 mt-1">不一定要上傳檔案，只填寫說明也可以讓 AI 先給你初步檢核建議。</p>
     </div>
 
-    <!-- ③ 上傳規劃文件（可選） -->
+    <!-- ③ 上傳規劃文件 -->
     <div>
       <div class="section-title">&#9314; 上傳規劃文件 <span class="text-gray-400 font-normal">（可選，可多檔）</span></div>
       <div id="dropZone"
@@ -128,47 +109,85 @@
     <!-- ④ AI 設定 -->
     <div>
       <div class="section-title">&#9315; AI 設定</div>
-      <div>
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-          Gemini API Key
-          <span class="text-gray-400 font-normal text-xs ml-1">（只存在你的瀏覽器）</span>
-        </label>
-        <div class="relative">
-          <input id="geminiApiKey" type="password"
-            placeholder="AIza... 或留空使用伺服器預設"
-            class="w-full border border-gray-300 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
-          <button onclick="toggleApiKeyVisibility()"
-            class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">
-            &#128065;
-          </button>
+
+      <!-- 提供者切換 -->
+      <div class="flex gap-2 mb-4">
+        <button type="button" id="btnProviderGemini" onclick="switchProvider('gemini')"
+          class="flex-1 py-2 rounded-lg border-2 border-indigo-600 bg-indigo-600 text-white text-sm font-medium transition">
+          Google Gemini
+        </button>
+        <button type="button" id="btnProviderThird" onclick="switchProvider('openai_compat')"
+          class="flex-1 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-600 text-sm font-medium transition">
+          第三方 API
+        </button>
+      </div>
+
+      <!-- Gemini 設定 -->
+      <div id="sectionGemini">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            Gemini API Key <span class="text-gray-400 font-normal text-xs ml-1">（只存在你的瀏覽器）</span>
+          </label>
+          <div class="relative">
+            <input id="geminiApiKey" type="password"
+              placeholder="AIza... 或留空使用伺服器預設"
+              class="w-full border border-gray-300 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+            <button type="button" onclick="toggleVis('geminiApiKey')"
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">&#128065;</button>
+          </div>
+          <p class="text-xs text-gray-400 mt-1">
+            <a href="https://aistudio.google.com/apikey" target="_blank" class="text-indigo-500 hover:underline">
+              點此取得 Google AI Studio API Key &rarr;
+            </a>
+          </p>
         </div>
-        <p class="text-xs text-gray-400 mt-1">
-          <a href="https://aistudio.google.com/apikey" target="_blank" class="text-indigo-500 hover:underline">
-            點此取得 Google AI Studio API Key &rarr;
-          </a>
-        </p>
+        <div class="mt-3">
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            Gemini 模型 <span class="text-gray-400 font-normal text-xs ml-1">（503 錯誤時請換其他模型）</span>
+          </label>
+          <select id="geminiModel"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white">
+            <option value="gemini-2.0-flash">gemini-2.0-flash（穩定，推薦）</option>
+            <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite（最快，免費額度最高）</option>
+            <option value="gemini-1.5-flash">gemini-1.5-flash（較舊但穩定）</option>
+            <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b（輕量，最不容易 503）</option>
+            <option value="gemini-flash-latest">gemini-flash-latest（自動最新）</option>
+            <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview（最強，較易 503）</option>
+          </select>
+          <p class="text-xs text-gray-400 mt-1">免費 API 有每分鐘限制，遇到 503 換模型即可</p>
+        </div>
       </div>
-      <!-- 模型選擇 -->
-      <div class="mt-3">
-        <label class="block text-sm font-medium text-gray-700 mb-1">
-          Gemini 模型
-          <span class="text-gray-400 font-normal text-xs ml-1">（503 錯誤時請換其他模型）</span>
-        </label>
-        <select id="geminiModel"
-          class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white">
-          <option value="gemini-2.0-flash">gemini-2.0-flash（穩定，推薦）</option>
-          <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite（最快，免費額度最高）</option>
-          <option value="gemini-1.5-flash">gemini-1.5-flash（較舊但穩定）</option>
-          <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b（輕量，最不容易 503）</option>
-          <option value="gemini-flash-latest">gemini-flash-latest（自動最新）</option>
-          <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview（最強，較易 503）</option>
-        </select>
-        <p class="text-xs text-gray-400 mt-1">免費 API 有每分鐘限制，遇到 503 換模型即可</p>
+
+      <!-- 第三方 API 設定 -->
+      <div id="sectionThird" class="hidden">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">接口地址</label>
+          <input id="thirdBaseUrl" type="text" value="https://api.runapi.sbs/v1"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+        </div>
+        <div class="mt-3">
+          <label class="block text-sm font-medium text-gray-700 mb-1">
+            API Key <span class="text-gray-400 font-normal text-xs ml-1">（sk-xxx 格式）</span>
+          </label>
+          <div class="relative">
+            <input id="thirdApiKey" type="password" placeholder="sk-xxxxxxxxxxxxxxxx"
+              class="w-full border border-gray-300 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+            <button type="button" onclick="toggleVis('thirdApiKey')"
+              class="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 text-xs">&#128065;</button>
+          </div>
+        </div>
+        <div class="mt-3">
+          <label class="block text-sm font-medium text-gray-700 mb-1">模型名稱</label>
+          <input id="thirdModel" type="text" placeholder="例：claude-sonnet-4-20250514、gpt-4o"
+            class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+          <p class="text-xs text-gray-400 mt-1">填入第三方平台支援的模型名稱</p>
+        </div>
       </div>
+
       <!-- 記住設定 -->
       <div class="mt-3 flex items-center gap-2">
         <input type="checkbox" id="rememberSettings" class="rounded" checked>
-        <label for="rememberSettings" class="text-xs text-gray-500">記住我的 API Key（儲存在本機 localStorage）</label>
+        <label for="rememberSettings" class="text-xs text-gray-500">記住我的設定（儲存在本機 localStorage）</label>
       </div>
     </div>
 
@@ -178,18 +197,17 @@
       <span id="btnText">&#128269; 開始檢核</span>
     </button>
 
-    <!-- 錯誤訊息 -->
     <div id="errorMsg" class="hidden bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm"></div>
   </div>
 
-  <!-- 進度顯示 -->
+  <!-- 進度 -->
   <div id="progressCard" class="hidden bg-white rounded-2xl shadow p-8 mt-6 text-center">
     <svg class="spinner w-10 h-10 text-indigo-600 mx-auto mb-4" fill="none" viewBox="0 0 24 24">
       <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
       <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
     </svg>
     <p class="font-medium text-gray-700" id="progressText">正在分析文件，請稍候…</p>
-    <p class="text-sm text-gray-400 mt-1" id="progressSub">Gemini 正在對照 437 筆檢核項目</p>
+    <p class="text-sm text-gray-400 mt-1" id="progressSub">AI 正在對照 437 筆檢核項目</p>
   </div>
 
 </main>
@@ -209,13 +227,12 @@ function copyTemplate() {
     msg.classList.remove('hidden');
     setTimeout(() => msg.classList.add('hidden'), 3000);
   }).catch(() => {
-    // fallback: 直接填入 textarea
     const ta = document.getElementById('contextInput');
     if (!ta.value.trim()) ta.value = TEMPLATE;
   });
 }
 
-// ── 載入場景清單 ──
+// 場景清單
 fetch('/api/scenes').then(r => r.json()).then(data => {
   const sel = document.getElementById('sceneSelect');
   data.scenes.forEach(s => {
@@ -225,29 +242,42 @@ fetch('/api/scenes').then(r => r.json()).then(data => {
   });
 }).catch(() => {});
 
-// ── 還原儲存設定 ──
-window.addEventListener('DOMContentLoaded', () => {
-  const savedKey = localStorage.getItem('gemini_api_key');
-  if (savedKey) document.getElementById('geminiApiKey').value = savedKey;
-  const savedModel = localStorage.getItem('gemini_model');
-  if (savedModel) document.getElementById('geminiModel').value = savedModel;
-});
-
-// ── Toggle API Key 可見度 ──
-function toggleApiKeyVisibility() {
-  const inp = document.getElementById('geminiApiKey');
-  inp.type = inp.type === 'password' ? 'text' : 'password';
+// API 提供者切換
+let currentProvider = 'gemini';
+function switchProvider(p) {
+  currentProvider = p;
+  const isGemini = p === 'gemini';
+  document.getElementById('sectionGemini').classList.toggle('hidden', !isGemini);
+  document.getElementById('sectionThird').classList.toggle('hidden', isGemini);
+  const on  = 'flex-1 py-2 rounded-lg border-2 border-indigo-600 bg-indigo-600 text-white text-sm font-medium transition';
+  const off = 'flex-1 py-2 rounded-lg border-2 border-gray-300 bg-white text-gray-600 text-sm font-medium transition';
+  document.getElementById('btnProviderGemini').className = isGemini ? on : off;
+  document.getElementById('btnProviderThird').className  = isGemini ? off : on;
 }
 
-// ── 拖放處理（多檔） ──
+// 還原設定
+window.addEventListener('DOMContentLoaded', () => {
+  const v = (k) => localStorage.getItem(k);
+  if (v('gemini_api_key')) document.getElementById('geminiApiKey').value = v('gemini_api_key');
+  if (v('gemini_model'))   document.getElementById('geminiModel').value  = v('gemini_model');
+  if (v('api_provider'))   switchProvider(v('api_provider'));
+  if (v('third_api_key'))  document.getElementById('thirdApiKey').value  = v('third_api_key');
+  if (v('third_model'))    document.getElementById('thirdModel').value   = v('third_model');
+  if (v('third_base_url')) document.getElementById('thirdBaseUrl').value = v('third_base_url');
+});
+
+// 顯示/隱藏密碼
+function toggleVis(id) {
+  const el = document.getElementById(id);
+  el.type = el.type === 'password' ? 'text' : 'password';
+}
+
+// 拖放（多檔）
 let selectedFiles = [];
 const dropZone  = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 
-dropZone.addEventListener('dragover', e => {
-  e.preventDefault();
-  dropZone.classList.add('drag-over');
-});
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
 dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
   e.preventDefault();
@@ -256,54 +286,66 @@ dropZone.addEventListener('drop', e => {
   if (files.length) setFiles(files);
 });
 fileInput.addEventListener('change', () => {
-  const files = Array.from(fileInput.files);
-  if (files.length) setFiles(files);
+  if (fileInput.files.length) setFiles(Array.from(fileInput.files));
 });
 
 function setFiles(files) {
   selectedFiles = files;
   document.getElementById('dropContent').classList.add('hidden');
   document.getElementById('fileChosen').classList.remove('hidden');
-  const listEl = document.getElementById('fileList');
-  listEl.innerHTML = files.map(f =>
+  document.getElementById('fileList').innerHTML = files.map(f =>
     `<p class="text-sm font-medium text-indigo-700">&#10003; ${f.name}</p>`
   ).join('');
 }
 
-// ── 送出 ──
+// 送出
 async function submitCheck() {
   const memberName   = document.getElementById('memberName').value.trim();
   const sceneHint    = document.getElementById('sceneSelect').value;
   const contextInput = document.getElementById('contextInput').value.trim();
   const apiKey       = document.getElementById('geminiApiKey').value.trim();
   const remember     = document.getElementById('rememberSettings').checked;
+  const thirdKey     = document.getElementById('thirdApiKey').value.trim();
+  const thirdModel   = document.getElementById('thirdModel').value.trim();
+  const thirdUrl     = document.getElementById('thirdBaseUrl').value.trim();
 
   if (!selectedFiles.length && !contextInput) {
-    showError('&#35531;&#19978;&#20659;&#27284;&#26696;&#65292;&#25110;&#22312;&#12300;&#35498;&#26126;&#12301;&#26041;&#22612;&#20837;&#20839;&#23481;');
+    showError('請上傳檔案，或在「說明」方塊填入內容');
     return;
   }
+  if (currentProvider === 'openai_compat') {
+    if (!thirdKey)   { showError('請填入第三方 API Key'); return; }
+    if (!thirdModel) { showError('請填入第三方模型名稱'); return; }
+  }
 
-  if (remember && apiKey) localStorage.setItem('gemini_api_key', apiKey);
-  if (remember) localStorage.setItem('gemini_model', document.getElementById('geminiModel').value);
+  if (remember) {
+    localStorage.setItem('api_provider', currentProvider);
+    if (apiKey)     localStorage.setItem('gemini_api_key', apiKey);
+    localStorage.setItem('gemini_model', document.getElementById('geminiModel').value);
+    if (thirdKey)   localStorage.setItem('third_api_key', thirdKey);
+    if (thirdModel) localStorage.setItem('third_model', thirdModel);
+    if (thirdUrl)   localStorage.setItem('third_base_url', thirdUrl);
+  }
 
   setLoading(true);
   hideError();
 
   const fd = new FormData();
   selectedFiles.forEach(f => fd.append('files', f));
-  fd.append('member_name',   memberName);
-  fd.append('scene_hint',    sceneHint);
-  fd.append('context_input', contextInput);
-  fd.append('gemini_model',  document.getElementById('geminiModel').value);
-  if (apiKey) fd.append('gemini_api_key', apiKey);
+  fd.append('member_name',        memberName);
+  fd.append('scene_hint',         sceneHint);
+  fd.append('context_input',      contextInput);
+  fd.append('api_provider',       currentProvider);
+  fd.append('gemini_model',       document.getElementById('geminiModel').value);
+  if (apiKey)     fd.append('gemini_api_key',       apiKey);
+  if (thirdKey)   fd.append('third_party_key',      thirdKey);
+  if (thirdModel) fd.append('third_party_model',    thirdModel);
+  if (thirdUrl)   fd.append('third_party_base_url', thirdUrl);
 
   const tips = [
-    'AI 正在閱讀你的文件…',
-    '對照 437 筆檢核項目中…',
-    '辨識場景與層級…',
-    '分析落差與缺口…',
-    '生成補件建議清單…',
-    '計算 TC4 評分…',
+    'AI 正在閱讀你的文件…', '對照 437 筆檢核項目中…',
+    '辨識場景與層級…', '分析落差與缺口…',
+    '生成補件建議清單…', '計算 TC4 評分…',
   ];
   let tipIdx = 0;
   const tipTimer = setInterval(() => {

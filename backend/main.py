@@ -49,12 +49,17 @@ async def root():
 
 @app.post("/api/check")
 async def api_check(
-    files:           List[UploadFile]     = File(default=[]),
-    scene_hint:      str                  = Form(""),
-    member_name:     str                  = Form(""),
-    context_input:   str                  = Form(""),   # 學員說明文字
-    gemini_api_key:  str                  = Form(""),   # 前端帶入的 API Key（可選）
-    gemini_model:    str                  = Form(""),   # 前端選擇的模型（可選）
+    files:               List[UploadFile] = File(default=[]),
+    scene_hint:          str              = Form(""),
+    member_name:         str              = Form(""),
+    context_input:       str              = Form(""),
+    gemini_api_key:      str              = Form(""),
+    gemini_model:        str              = Form(""),
+    # 第三方 API
+    api_provider:        str              = Form("gemini"),          # "gemini" | "openai_compat"
+    third_party_key:     str              = Form(""),
+    third_party_model:   str              = Form(""),
+    third_party_base_url:str              = Form("https://api.runapi.sbs/v1"),
 ):
     """
     上傳規劃文件（可多檔，或只填說明文字），執行完整檢核流程。
@@ -83,16 +88,20 @@ async def api_check(
     if not combined_doc_text and not context_input.strip():
         raise HTTPException(400, "請上傳規劃文件，或填入說明文字")
 
-    # 執行檢核（傳入 API Key / Model Override）
+    # 執行檢核
     result = checker.run_check(
-        file_bytes      = b"",       # 文字已在上面解析完畢
-        filename        = filename,
-        scene_hint      = scene_hint,
-        member_name     = member_name,
-        context_input   = context_input,
-        gemini_api_key  = gemini_api_key or None,
-        gemini_model    = gemini_model or None,
-        pre_extracted   = combined_doc_text or None,  # 直接傳入已解析文字
+        file_bytes           = b"",
+        filename             = filename,
+        scene_hint           = scene_hint,
+        member_name          = member_name,
+        context_input        = context_input,
+        gemini_api_key       = gemini_api_key or None,
+        gemini_model         = gemini_model or None,
+        pre_extracted        = combined_doc_text or None,
+        api_provider         = api_provider or "gemini",
+        third_party_key      = third_party_key or None,
+        third_party_model    = third_party_model or None,
+        third_party_base_url = third_party_base_url or "https://api.runapi.sbs/v1",
     )
 
     if "error" in result:
@@ -181,15 +190,4 @@ async def admin_page():
     return HTMLResponse("<h1>管理頁面</h1>")
 
 
-# ─── 健康檢查 ─────────────────────────────────────────────────────────
-
-@app.get("/health")
-async def health():
-    from db_loader import load_db, load_skills
-    db_count   = len(load_db())
-    skill_keys = list(load_skills().keys())
-    return {
-        "status":     "ok",
-        "db_items":   db_count,
-        "skills_loaded": skill_keys,
-    }
+# ─── 健康檢查 ────────────────────

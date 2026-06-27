@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-gemini_client.py — Gemini API 呼叫（使用 google-genai SDK）
+gemini_client.py — AI API 呼叫
+支援兩種模式：
+  1. Gemini（google-genai SDK）
+  2. 第三方 OpenAI-compatible API（如 runapi.sbs）
 """
 
 import json
@@ -12,19 +15,25 @@ from google.genai import types
 from config import GEMINI_API_KEY, GEMINI_MODEL
 
 
-def _get_client(api_key: str = None):
-    """若有傳入 api_key 就用傳入的 key，否則使用環境變數的 key。"""
-    return genai.Client(api_key=api_key or GEMINI_API_KEY)
+# ─── Gemini client 快取 ───────────────────────────────────────────────
 
+_clients: dict = {}
+
+def _get_gemini_client(api_key: str):
+    if api_key not in _clients:
+        _clients[api_key] = genai.Client(api_key=api_key)
+    return _clients[api_key]
+
+
+# ─── Prompt 建構 ─────────────────────────────────────────────────────
 
 def build_prompt(
     doc_text: str,
     scene: str,
     level: str,
-    check_items: list[dict],
+    check_items: list,
     skill_context: str,
 ) -> str:
-    """建立給 Gemini 的完整 prompt。"""
     items_text = ""
     for it in check_items:
         items_text += (
@@ -98,16 +107,67 @@ def build_prompt(
 """
 
 
+# ─── 第三方 OpenAI-compatible API ────────────────────────────────────
+
+def _call_openai_compatible(
+    prompt: str,
+    api_key: str,
+    model: str,
+    base_url: str = "https://api.runapi.sbs/v1",
+) -> dict:
+    """呼叫 OpenAI-compatible 第三方 API，回傳解析後 dict。"""
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return {"error": "缺少 openai 套件，請聯絡管理員"}
+
+    try:
+        client = OpenAI(api_key=api_key, base_url=base_url)
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=8192,
+            response_format={"type": "json_object"},
+        )
+        raw_text = resp.choices[0].message.content
+        raw_text = re.sub(r'```json\n?', '', raw_text)
+        raw_text = re.sub(r'```\n?', '', raw_text)
+        return json.loads(raw_text)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─── 主入口 ──────────────────────────────────────────────────────────
+
 def analyze(
     doc_text: str,
     scene: str,
     level: str,
-    check_items: list[dict],
+    check_items: list,
     skill_context: str,
-    api_key: str = None,        # per-request 覆蓋
-    model_override: str = None, # per-request 覆蓋
+    api_key: str = None,          # Gemini key（per-request 覆蓋）
+    model_override: str = None,   # Gemini model（per-request 覆蓋）
+    # 第三方 API 參數
+    provider: str = "gemini",     # "gemini" 或 "openai_compat"
+    third_party_key: str = None,
+    third_party_model: str = None,
+    third_party_base_url: str = "https://api.runapi.sbs/v1",
 ) -> dict:
-    """呼叫 Gemini，回傳解析後的 dict。"""
+    prompt = build_prompt(doc_text, scene, level, check_items, skill_context)
+
+    if provider == "openai_compat":
+        if not third_party_key:
+            return {"error": "請填入第三方 API Key"}
+        if not third_party_model:
+            return {"error": "請填入第三方模型名稱"}
+        return _call_openai_compatible(
+            prompt=prompt,
+            api_key=third_party_key,
+            model=third_party_model,
+            base_url=third_party_base_url,
+        )
+
+    # 預設：Gemini
     effective_key   = api_key or GEMINI_API_KEY
     effective_model = model_override or GEMINI_MODEL
 
@@ -115,9 +175,7 @@ def analyze(
         return {"error": "GEMINI_API_KEY 未設定，請在頁面的「AI 設定」欄填入你的 API Key"}
 
     try:
-        client = _get_client(effective_key)
-        prompt = build_prompt(doc_text, scene, level, check_items, skill_context)
-
+        client = _get_gemini_client(effective_key)
         resp = client.models.generate_content(
             model=effective_model,
             contents=prompt,
@@ -126,12 +184,9 @@ def analyze(
                 max_output_tokens=8192,
             ),
         )
-
         raw_text = resp.text
-        # Clean up markdown code fences if present
         raw_text = re.sub(r'```json\n?', '', raw_text)
         raw_text = re.sub(r'```\n?', '', raw_text)
-
         return json.loads(raw_text)
     except Exception as e:
         return {"error": str(e)}

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-checker.py — 核心檢核邏輯：解析文件 -> 辨識場景 -> 呼叫 Gemini -> 計算 TC4 評分
+checker.py — 核心檢核邏輯
 """
 
 import io
@@ -109,6 +109,10 @@ def run_check(
     gemini_api_key: str = None,
     gemini_model: str = None,
     pre_extracted: str = None,
+    api_provider: str = "gemini",
+    third_party_key: str = None,
+    third_party_model: str = None,
+    third_party_base_url: str = "https://api.runapi.sbs/v1",
 ) -> dict:
     check_id  = str(uuid.uuid4())
     timestamp = datetime.now().isoformat()
@@ -137,29 +141,33 @@ def run_check(
     db_items      = filter_items(scene, level)
     skill_context = extract_skill_context(scene, level)
 
-    # 4. 呼叫 Gemini
-    gemini_result = gemini_client.analyze(
-        doc_text       = doc_text,
-        scene          = scene,
-        level          = level,
-        check_items    = db_items,
-        skill_context  = skill_context,
-        api_key        = gemini_api_key,
-        model_override = gemini_model,
+    # 4. 呼叫 AI
+    ai_result = gemini_client.analyze(
+        doc_text             = doc_text,
+        scene                = scene,
+        level                = level,
+        check_items          = db_items,
+        skill_context        = skill_context,
+        api_key              = gemini_api_key,
+        model_override       = gemini_model,
+        provider             = api_provider,
+        third_party_key      = third_party_key,
+        third_party_model    = third_party_model,
+        third_party_base_url = third_party_base_url,
     )
 
-    if "error" in gemini_result:
+    if "error" in ai_result:
         return {
             "check_id":  check_id,
-            "error":     gemini_result["error"],
+            "error":     ai_result["error"],
             "timestamp": timestamp,
         }
 
     # 5. TC4 評分
-    tc4 = calculate_tc4_score(gemini_result.get("items", []), db_items)
+    tc4 = calculate_tc4_score(ai_result.get("items", []), db_items)
 
     # 6. 統計
-    items = gemini_result.get("items", [])
+    items = ai_result.get("items", [])
     stats = {r: sum(1 for i in items if i.get("result") == r)
              for r in ["已完成", "部分完成", "未完成", "不適用", "需補件", "需確認"]}
 
@@ -168,15 +176,15 @@ def run_check(
         "timestamp":         timestamp,
         "filename":          filename,
         "member_name":       member_name,
-        "scene":             gemini_result.get("scene_confirmed", scene),
-        "level":             gemini_result.get("level_confirmed", level),
-        "scene_note":        gemini_result.get("scene_note", ""),
+        "scene":             ai_result.get("scene_confirmed", scene),
+        "level":             ai_result.get("level_confirmed", level),
+        "scene_note":        ai_result.get("scene_note", ""),
         "auto_confidence":   confidence,
         "score":             tc4["score"],
         "passed":            tc4["passed"],
         "stats":             stats,
         "items":             items,
-        "overall_comment":   gemini_result.get("overall_comment", ""),
+        "overall_comment":   ai_result.get("overall_comment", ""),
         "total_db_items":    len(db_items),
         "has_context_input": bool(context_input.strip()),
     }
