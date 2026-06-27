@@ -49,47 +49,55 @@ async def root():
 
 @app.post("/api/check")
 async def api_check(
-    file:        UploadFile = File(...),
-    scene_hint:  str        = Form(""),
-    member_name: str        = Form(""),
+    file:            Optional[UploadFile] = File(None),
+    scene_hint:      str                  = Form(""),
+    member_name:     str                  = Form(""),
+    context_input:   str                  = Form(""),
+    gemini_api_key:  str                  = Form(""),
+    gemini_model:    str                  = Form(""),
 ):
     """
-    上傳規劃文件，執行完整檢核流程。
-    回傳 JSON 結果（含評分、逐項結果）。
+    上傳規劃文件（或只填說明文字），執行完整檢核流程。
     """
-    # 檔案類型檢查
-    suffix = Path(file.filename).suffix.lower()
-    if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(400, f"不支援的檔案格式 {suffix}，請上傳 .docx 或 .xlsx")
+    file_bytes = b""
+    filename   = ""
 
-    # 檔案大小檢查
-    file_bytes = await file.read()
-    if len(file_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(400, f"檔案超過 {MAX_UPLOAD_MB}MB 限制")
+    if file and file.filename:
+        suffix = Path(file.filename).suffix.lower()
+        if suffix not in ALLOWED_EXTENSIONS:
+            raise HTTPException(400, f"不支援的檔案格式 {suffix}，請上傳 .docx 或 .xlsx")
 
-    # 執行檢核
+        file_bytes = await file.read()
+        if len(file_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(400, f"檔案超過 {MAX_UPLOAD_MB}MB 限制")
+        filename = file.filename
+
+    if not file_bytes and not context_input.strip():
+        raise HTTPException(400, "請上傳規劃文件，或填入說明文字")
+
     result = checker.run_check(
-        file_bytes   = file_bytes,
-        filename     = file.filename,
-        scene_hint   = scene_hint,
-        member_name  = member_name,
+        file_bytes      = file_bytes,
+        filename        = filename,
+        scene_hint      = scene_hint,
+        member_name     = member_name,
+        context_input   = context_input,
+        gemini_api_key  = gemini_api_key or None,
+        gemini_model    = gemini_model or None,
     )
 
     if "error" in result:
         raise HTTPException(500, result["error"])
 
-    # 存歷史記錄
     try:
         save_record(result)
     except Exception:
-        pass  # 存 DB 失敗不影響回傳
+        pass
 
     return result
 
 
 @app.get("/api/result/{check_id}")
 async def api_get_result(check_id: str):
-    """取得歷史檢核結果。"""
     rec = get_record(check_id)
     if not rec:
         raise HTTPException(404, "找不到此檢核記錄")
@@ -98,7 +106,6 @@ async def api_get_result(check_id: str):
 
 @app.get("/api/report/{check_id}/word")
 async def api_download_word(check_id: str):
-    """下載 Word 格式報告。"""
     rec = get_record(check_id)
     if not rec:
         raise HTTPException(404, "找不到此檢核記錄")
@@ -113,12 +120,24 @@ async def api_download_word(check_id: str):
 
 @app.get("/api/report/{check_id}/html")
 async def api_download_html(check_id: str):
-    """取得 HTML 格式報告（可在瀏覽器列印成 PDF）。"""
     rec = get_record(check_id)
     if not rec:
         raise HTTPException(404, "找不到此檢核記錄")
     html = report_generator.generate_html_report(rec)
     return HTMLResponse(content=html)
+
+
+# ─── 靜態頁面（result / admin）────────────────────────────────────────
+
+@app.get("/result.html", response_class=HTMLResponse)
+async def result_page():
+    p = FRONTEND_DIR / "result.html"
+    return HTMLResponse(content=p.read_text(encoding="utf-8") if p.exists() else "<h1>找不到頁面</h1>")
+
+@app.get("/admin.html", response_class=HTMLResponse)
+async def admin_page_html():
+    p = FRONTEND_DIR / "admin.html"
+    return HTMLResponse(content=p.read_text(encoding="utf-8") if p.exists() else "<h1>找不到頁面</h1>")
 
 
 # ─── 管理員 API ──────────────────────────────────────────────────────
@@ -130,14 +149,12 @@ def _check_admin(token: Optional[str]):
 
 @app.get("/api/admin/history")
 async def api_history(x_admin_token: Optional[str] = Header(None)):
-    """William 查看所有檢核記錄（需 X-Admin-Token header）。"""
     _check_admin(x_admin_token)
     return get_all_records(limit=200)
 
 
 @app.post("/api/admin/reload-db")
 async def api_reload_db(x_admin_token: Optional[str] = Header(None)):
-    """重新載入 Excel 資料庫和 Skill 文件（上傳新版後呼叫）。"""
     _check_admin(x_admin_token)
     from db_loader import load_db, load_skills
     load_db.cache_clear()
@@ -147,11 +164,8 @@ async def api_reload_db(x_admin_token: Optional[str] = Header(None)):
 
 @app.get("/api/scenes")
 async def api_scenes():
-    """回傳所有可用場景清單（前端下拉選單用）。"""
     return {"scenes": list(SCENE_KEYWORDS.keys())}
 
-
-# ─── 管理頁面 ────────────────────────────────────────────────────────
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
