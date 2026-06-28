@@ -90,22 +90,60 @@ def build_prompt(
 
 
 def _parse_json(raw: str) -> dict:
-    """從原始文字中提取 JSON，容錯處理 markdown code fence。"""
+    """
+    從原始文字中提取最後一個完整 JSON 物件。
+    - 移除 markdown code fence
+    - 跳過模型的思考過程文字（取最後一個 { 開始的區塊）
+    - 若截斷（Expecting ',' 等），嘗試在最後一個完整項目處截斷修補
+    """
     if not raw or not raw.strip():
         return {"error": "AI 回傳空白內容，請換模型或稍後再試"}
+
     # 移除 markdown code block
     text = re.sub(r'```json\s*', '', raw)
     text = re.sub(r'```\s*', '', text)
     text = text.strip()
-    # 找第一個 { 到最後一個 }
-    start = text.find('{')
-    end   = text.rfind('}')
-    if start == -1 or end == -1:
+
+    # 找最後一個 { 開始（跳過思考過程）
+    # 策略：找所有 { 位置，從後往前找能成功解析的最長 JSON
+    start = text.rfind('\n{')
+    if start == -1:
+        start = text.find('{')
+    else:
+        start += 1  # 跳過換行
+
+    if start == -1:
         return {"error": f"AI 回傳非 JSON 格式：{text[:200]}"}
+
+    end = text.rfind('}')
+    if end == -1 or end < start:
+        return {"error": f"AI 回傳非 JSON 格式（找不到結尾）：{text[:200]}"}
+
+    candidate = text[start:end+1]
+
+    # 第一次嘗試：直接解析
     try:
-        return json.loads(text[start:end+1])
+        return json.loads(candidate)
+    except json.JSONDecodeError:
+        pass
+
+    # 第二次嘗試：JSON 被截斷 → 在最後一個完整的 }] 或 } 處補上收尾
+    # 找最後一個完整的 item（以 }] 結束的位置）
+    last_complete = candidate.rfind('}]')
+    if last_complete != -1:
+        # 截到最後完整 item，補上 overall_comment 和收尾
+        truncated = candidate[:last_complete+2]
+        repaired = truncated + ', "overall_comment": "（AI 輸出被截斷，以下為部分結果）"}'
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
+    # 最後回退：回傳錯誤訊息含原始前200字
+    try:
+        json.loads(candidate)
     except json.JSONDecodeError as e:
-        return {"error": f"JSON 解析失敗：{e}。原始內容前200字：{text[:200]}"}
+        return {"error": f"JSON 解析失敗：{e}。原始內容前200字：{candidate[:200]}"}
 
 
 # ─── 第三方 OpenAI-compatible API ────────────────────────────────────
@@ -126,7 +164,7 @@ def _call_openai_compatible(
         resp = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=8192,
+            max_tokens=16000,
         )
         raw_text = resp.choices[0].message.content or ""
         return _parse_json(raw_text)
@@ -145,41 +183,4 @@ def analyze(
     api_key: str = None,
     model_override: str = None,
     provider: str = "gemini",
-    third_party_key: str = None,
-    third_party_model: str = None,
-    third_party_base_url: str = "https://api.runapi.sbs/v1",
-) -> dict:
-    prompt = build_prompt(doc_text, scene, level, check_items, skill_context)
-
-    if provider == "openai_compat":
-        if not third_party_key:
-            return {"error": "請填入第三方 API Key"}
-        if not third_party_model:
-            return {"error": "請填入第三方模型名稱"}
-        return _call_openai_compatible(
-            prompt=prompt,
-            api_key=third_party_key,
-            model=third_party_model,
-            base_url=third_party_base_url,
-        )
-
-    # Gemini
-    effective_key   = api_key or GEMINI_API_KEY
-    effective_model = model_override or GEMINI_MODEL
-
-    if not effective_key:
-        return {"error": "GEMINI_API_KEY 未設定，請填入你的 API Key"}
-
-    try:
-        client = _get_gemini_client(effective_key)
-        resp = client.models.generate_content(
-            model=effective_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=8192,
-            ),
-        )
-        return _parse_json(resp.text or "")
-    except Exception as e:
-        return {"error": str(e)}
+    third_party_key
