@@ -386,15 +386,9 @@ async function submitCheck() {
 
   try {
     const resp = await fetch('/api/check', { method: 'POST', body: fd });
+    const data = await resp.json();
     clearInterval(tipTimer);
-    const rawText = await resp.text();
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch (_) {
-      throw new Error('伺服器回傳非預期內容：' + rawText.slice(0, 120));
-    }
-    if (!resp.ok) throw new Error(data.detail || data.error || '檢核失敗');
+    if (!resp.ok) throw new Error(data.detail || '檢核失敗');
     renderResult(data);
   } catch (err) {
     clearInterval(tipTimer);
@@ -454,11 +448,27 @@ function renderItems(items) {
   items.forEach(it => {
     const cfg = RESULT_CONFIG[it.result] || { bg:'bg-gray-50', border:'border-gray-200', tag:'tag-na', emoji:'?' };
     const missing = (it.missing || []).map(m => `<li class="ml-4">${m}</li>`).join('');
+
+    // 權重標籤
+    const w = it.weight || 0;
+    const m = it.mention_count || 0;
+    let wColor = 'bg-gray-100 text-gray-500';
+    let wLabel = '一般';
+    if (w >= 1.5)      { wColor = 'bg-red-100 text-red-700';       wLabel = '高'; }
+    else if (w >= 1.2) { wColor = 'bg-orange-100 text-orange-700'; wLabel = '中高'; }
+    else if (w >= 1.0) { wColor = 'bg-yellow-100 text-yellow-700'; wLabel = '中'; }
+    const wBadge = w > 0
+      ? `<span class="${wColor} text-xs px-1.5 py-0.5 rounded font-medium" title="William 提及 ${m} 次，計分權重 ${w}">⚖️ ${wLabel} ×${w}</span>`
+      : '';
+
     list.innerHTML += `
       <div class="item-card ${cfg.bg} border ${cfg.border} rounded-xl p-4" data-result="${it.result}">
         <div class="flex items-start justify-between gap-2 mb-1">
           <p class="font-semibold text-gray-800 text-sm">${cfg.emoji} <span class="text-gray-400 text-xs mr-1">序${it.seq}</span>${it.item}</p>
-          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${cfg.tag}">${it.result}</span>
+          <div class="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+            ${wBadge}
+            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${cfg.tag}">${it.result}</span>
+          </div>
         </div>
         ${it.evidence && it.evidence !== '文件未提及' ? `<p class="text-xs text-gray-400 italic mb-1">"${it.evidence}"</p>` : ''}
         ${missing ? `<ul class="text-sm text-blue-900 mt-1 list-disc">${missing}</ul>` : ''}

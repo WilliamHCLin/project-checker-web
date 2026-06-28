@@ -193,8 +193,20 @@ def run_check(
     # 6. TC4 評分
     tc4 = calculate_tc4_score(ai_result.get("items", []), db_items)
 
-    # 7. 統計
-    items = ai_result.get("items", [])
+    # 7. 把 mention_count 和 weight 合併進每個 item
+    db_map = {it["seq"]: it for it in db_items}
+    items = []
+    for it in ai_result.get("items", []):
+        db_it = db_map.get(it.get("seq"), {})
+        mention = db_it.get("mention_count", 0)
+        weight  = get_mention_weight(mention)
+        items.append({
+            **it,
+            "mention_count": mention,
+            "weight":        weight,
+        })
+
+    # 8. 統計
     stats = {r: sum(1 for i in items if i.get("result") == r)
              for r in ["已達標", "部分達標", "未達標", "不適用", "需補件", "需確認"]}
 
