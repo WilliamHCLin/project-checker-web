@@ -13,7 +13,6 @@ import openpyxl
 
 from config import (
     DB_PATH, SKILL_PATHS, LEVEL_ORDER,
-    SCENE_KEYWORDS, LEVEL_KEYWORDS,
     SKILL_INJECT_CHARS, MENTION_HIGH_THRESHOLD,
 )
 
@@ -46,31 +45,48 @@ def load_db() -> list[dict]:
     return items
 
 
-def filter_items(scene: str, level: str) -> list[dict]:
+def get_all_scenes() -> list[str]:
+    """回傳資料庫中所有不重複的場景代碼，依原始順序。"""
+    seen = []
+    for item in load_db():
+        s = item["scene"]
+        if s and s not in seen:
+            seen.append(s)
+    return seen
+
+
+def filter_items(scenes, level: str) -> list[dict]:
     """
-    依場景和層級篩選適用的檢核項目。
+    依場景列表和層級篩選適用的檢核項目。
+    scenes 可以是 str（單一場景）或 list[str]（多場景）。
     G. 專案管理基本功 永遠包含（通用底層）。
     層級：A 包含 A+B+C，B 包含 B+C，C 只含 C。
+    結果去重（以 seq 為主鍵），依 mention_count 降序排列。
     """
+    if isinstance(scenes, str):
+        scenes = [scenes]
+
     all_items = load_db()
     min_level = LEVEL_ORDER.get(level, 1)
 
+    seen_seq = set()
     result = []
+
     for item in all_items:
         item_scene   = item["scene"]
         item_level_v = LEVEL_ORDER.get(item["level"], 1)
-        # 場景匹配：完全相同 or 場景開頭相符 or 屬於 G 通用
+        level_match  = item_level_v >= min_level
+
+        # 場景匹配：在選定場景中 or 屬於 G 通用
         scene_match = (
-            scene in item_scene
-            or item_scene.startswith(scene[:2])   # 依前兩字母 D1/D2 等前綴
+            any(item_scene == s or item_scene.startswith(s[:2]) for s in scenes)
             or "G." in item_scene
         )
-        level_match = item_level_v >= min_level
 
-        if scene_match and level_match:
+        if scene_match and level_match and item["seq"] not in seen_seq:
+            seen_seq.add(item["seq"])
             result.append(item)
 
-    # 依「被提及次數」降序排列（高優先先檢核）
     result.sort(key=lambda x: x["mention_count"], reverse=True)
     return result
 
@@ -102,15 +118,13 @@ def load_skills() -> dict[str, str]:
     return result
 
 
-def extract_skill_context(scene: str, level: str) -> str:
+def extract_skill_context(scenes: list, level: str) -> str:
     """
-    依場景和層級，從三份 Skill 中萃取最相關的段落，
-    回傳整合後的文字（注入 Gemini prompt 用）。
+    依場景列表和層級，從三份 Skill 中萃取最相關的段落。
     """
     skills = load_skills()
     parts = []
 
-    # ── 工作決策框架：取 T1 品質危機 + T5 專案執行 + T9 交付物審查 ──
     work_md = skills.get("工作框架", "")
     work_sections = _extract_sections(
         work_md,
@@ -120,10 +134,10 @@ def extract_skill_context(scene: str, level: str) -> str:
     if work_sections:
         parts.append("## William 工作決策框架（節選）\n" + work_sections)
 
-    # ── 生命動能框架：取 TLQ8 活動執行 + TLQ9 新活動規劃前 ──
     assoc_md = skills.get("協會框架", "")
-    # 比賽場景加入 TLQ4 策略
-    extra_tlq = ["TLQ4 · 協會策略"] if scene.startswith("C.") else []
+    # 比賽場景加入策略段落
+    has_competition = any(s.startswith("F.") or "競賽" in s for s in scenes)
+    extra_tlq = ["TLQ4 · 協會策略"] if has_competition else []
     assoc_sections = _extract_sections(
         assoc_md,
         targets=["TLQ8 · 活動執行", "TLQ9 · 新活動規劃", "TLQ1 · 臨時任務"] + extra_tlq,
@@ -132,7 +146,6 @@ def extract_skill_context(scene: str, level: str) -> str:
     if assoc_sections:
         parts.append("## 生命動能協會管理框架（節選）\n" + assoc_sections)
 
-    # ── 情境決策原則庫：取「入場協議」+ 「專案管理」前段 ──
     principle_md = skills.get("原則庫", "")
     principle_sections = _extract_sections(
         principle_md,
@@ -146,14 +159,9 @@ def extract_skill_context(scene: str, level: str) -> str:
 
 
 def _extract_sections(md_text: str, targets: list[str], max_chars: int) -> str:
-    """
-    從 markdown 全文中找出包含 targets 關鍵字的 section（## / ### 開頭），
-    合併後截斷至 max_chars。
-    """
     if not md_text:
         return ""
 
-    # 把文件切成 section
     sections = re.split(r'\n(?=#{1,3} )', md_text)
     collected = []
     total = 0
@@ -172,26 +180,24 @@ def _extract_sections(md_text: str, targets: list[str], max_chars: int) -> str:
     return combined[:max_chars] if len(combined) > max_chars else combined
 
 
-# ─── 場景自動辨識 ─────────────────────────────────────────────────────
+# ─── 場景自動辨識（保留為備援，主要改由 AI 辨識）────────────────────
 
 def detect_scene(text: str) -> dict:
-    """
-    依文件全文關鍵字比對，回傳場景辨識結果。
-    """
+    """關鍵字備援辨識，用於 AI 辨識失敗時的 fallback。"""
+    from config import SCENE_KEYWORDS, LEVEL_KEYWORDS
     text_lower = text.lower()
     scores: dict[str, int] = {}
     matched_kw: dict[str, list] = {}
 
     for scene_code, keywords in SCENE_KEYWORDS.items():
         hits = [kw for kw in keywords if kw in text_lower or kw in text]
-        scores[scene_code]    = len(hits)
+        scores[scene_code]     = len(hits)
         matched_kw[scene_code] = hits
 
     best_scene = max(scores, key=scores.get) if scores else "G. 專案管理基本功"
     best_score = scores.get(best_scene, 0)
     confidence = min(int(best_score / max(len(SCENE_KEYWORDS.get(best_scene, [1])), 1) * 100), 100)
 
-    # 層級判斷
     level_scores: dict[str, int] = {}
     for lv, kws in LEVEL_KEYWORDS.items():
         level_scores[lv] = sum(1 for kw in kws if kw in text)

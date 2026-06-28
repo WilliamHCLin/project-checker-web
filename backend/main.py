@@ -17,7 +17,7 @@ import report_generator
 from models import save_record, get_all_records, get_record
 from config import (
     ADMIN_TOKEN, MAX_UPLOAD_MB, ALLOWED_EXTENSIONS,
-    SCENE_KEYWORDS, OUTPUT_DIR
+    OUTPUT_DIR
 )
 
 app = FastAPI(title="專案檢核系統", version="1.0.0")
@@ -177,7 +177,8 @@ async def api_reload_db(x_admin_token: Optional[str] = Header(None)):
 @app.get("/api/scenes")
 async def api_scenes():
     """回傳所有可用場景清單（前端下拉選單用）。"""
-    return {"scenes": list(SCENE_KEYWORDS.keys())}
+    from db_loader import get_all_scenes
+    return {"scenes": get_all_scenes()}
 
 
 # ─── 管理頁面 ────────────────────────────────────────────────────────

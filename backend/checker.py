@@ -60,8 +60,11 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
 # --- TC4 評分 ---
 
 RESULT_SCORES = {
+    "已達標":   1.0,
     "已完成":   1.0,
+    "部分達標": 0.5,
     "部分完成": 0.5,
+    "未達標":   0.0,
     "未完成":   0.0,
     "需補件":   0.0,
     "需確認":   0.0,
@@ -77,7 +80,7 @@ def calculate_tc4_score(items_result: list, db_items: list) -> dict:
 
     for res in items_result:
         seq        = res.get("seq")
-        result     = res.get("result", "未完成")
+        result     = res.get("result", "未達標")
         base_score = RESULT_SCORES.get(result)
 
         if base_score is None:
@@ -128,6 +131,16 @@ def run_check(
     check_id  = str(uuid.uuid4())
     timestamp = datetime.now().isoformat()
 
+    # 共用 AI 呼叫參數
+    ai_kwargs = dict(
+        api_key              = gemini_api_key,
+        model_override       = gemini_model,
+        provider             = api_provider,
+        third_party_key      = third_party_key,
+        third_party_model    = third_party_model,
+        third_party_base_url = third_party_base_url,
+    )
+
     # 1. 解析文件
     doc_text = ""
     if pre_extracted:
@@ -142,29 +155,32 @@ def run_check(
 
     detect_text = doc_text if doc_text else context_input
 
-    # 2. 場景辨識
-    auto_detect = detect_scene(detect_text)
-    scene       = scene_hint if scene_hint else auto_detect["scene"]
-    level       = auto_detect["level"]
-    confidence  = auto_detect["confidence"] if not scene_hint else 100
+    # 2. 場景辨識（第一輪 AI）
+    if scene_hint:
+        # member 手動指定場景，直接使用
+        scenes = [scene_hint]
+        confidence = 100
+    else:
+        # 讓 AI 讀完文件，選出最相關的 3 個場景
+        scenes = gemini_client.detect_scenes_ai(detect_text, **ai_kwargs)
+        confidence = 90  # AI 辨識信心值
 
-    # 3. 篩選檢核項目 + skill context
-    db_items      = filter_items(scene, level)
-    skill_context = extract_skill_context(scene, level)
+    # 3. 層級判斷（保留關鍵字備援）
+    fallback = detect_scene(detect_text)
+    level    = fallback["level"]
 
-    # 4. 呼叫 AI
+    # 4. 篩選檢核項目 + skill context（多場景合併去重）
+    db_items      = filter_items(scenes, level)
+    skill_context = extract_skill_context(scenes, level)
+
+    # 5. 第二輪 AI：完整分析
     ai_result = gemini_client.analyze(
-        doc_text             = doc_text,
-        scene                = scene,
-        level                = level,
-        check_items          = db_items,
-        skill_context        = skill_context,
-        api_key              = gemini_api_key,
-        model_override       = gemini_model,
-        provider             = api_provider,
-        third_party_key      = third_party_key,
-        third_party_model    = third_party_model,
-        third_party_base_url = third_party_base_url,
+        doc_text      = doc_text,
+        scenes        = scenes,
+        level         = level,
+        check_items   = db_items,
+        skill_context = skill_context,
+        **ai_kwargs,
     )
 
     if "error" in ai_result:
@@ -174,20 +190,21 @@ def run_check(
             "timestamp": timestamp,
         }
 
-    # 5. TC4 評分
+    # 6. TC4 評分
     tc4 = calculate_tc4_score(ai_result.get("items", []), db_items)
 
-    # 6. 統計
+    # 7. 統計
     items = ai_result.get("items", [])
     stats = {r: sum(1 for i in items if i.get("result") == r)
-             for r in ["已完成", "部分完成", "未完成", "不適用", "需補件", "需確認"]}
+             for r in ["已達標", "部分達標", "未達標", "不適用", "需補件", "需確認"]}
 
     return {
         "check_id":          check_id,
         "timestamp":         timestamp,
         "filename":          filename,
         "member_name":       member_name,
-        "scene":             ai_result.get("scene_confirmed", scene),
+        "scene":             ai_result.get("scene_confirmed", scenes[0] if scenes else ""),
+        "scenes_used":       ai_result.get("scenes_used", scenes),
         "level":             ai_result.get("level_confirmed", level),
         "scene_note":        ai_result.get("scene_note", ""),
         "auto_confidence":   confidence,
