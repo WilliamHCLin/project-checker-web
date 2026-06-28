@@ -1,7 +1,7 @@
 # 生命動能協會 專案檢核系統 — SPEC
 
 > 接手 AI 必讀。本文件描述系統的完整現狀、架構、流程、已知問題與待辦事項。
-> 最後更新：2026-06-28
+> 最後更新：2026-06-28（最新 commit：`8a3ed1a`）
 
 ---
 
@@ -72,8 +72,8 @@ main.py: 讀取所有上傳檔案，每個呼叫 checker.extract_text()
 checker.py: 合併文字 → 組成 doc_text
     ↓
 【第一輪 AI】gemini_client.detect_scenes_ai()
-  ├─ 讓 AI 讀完文件
-  └─ 從 21 個場景代碼中選出最相關的 3 個
+  ├─ 讓 AI 讀完文件（含段落 + 表格）
+  └─ 從 21 個場景代碼中選出最相關的 3 個（max_tokens=512）
     ↓
 db_loader.filter_items(scenes, level)
   ├─ 多場景合併撈出檢核項目（去重）
@@ -83,40 +83,49 @@ db_loader.extract_skill_context(scenes, level)
   └─ 從三份 Skill MD 萃取相關段落注入 prompt
     ↓
 【第二輪 AI】gemini_client.analyze()
-  ├─ 完整分析：理解文件 → 推論式對照 → 謹慎判定缺失
-  └─ 回傳 JSON：scene_confirmed, items[], overall_comment
+  ├─ 四步驟：理解文件 → 推論式對照 → 謹慎判定缺失 → 具體建議
+  └─ 回傳 JSON：scene_confirmed, scenes_used, items[], overall_comment
+    ↓
+checker.py: 把 mention_count + weight 合併進每個 item
     ↓
 checker.calculate_tc4_score()
-  └─ 依 mention_count 加權，計算百分制 TC4 分數
+  └─ 100 分往下扣，依 mention_count 加權計算
     ↓
-回傳結果 JSON，前端直接渲染在右欄
+回傳結果 JSON，前端直接渲染在右欄（含權重標籤）
 ```
 
 ### 4.2 場景辨識邏輯
 
 - **member 手動選**（前端下拉）：直接使用，跳過 AI 辨識
 - **未選（自動）**：第一輪 AI 讀完文件，從 21 個場景中選 3 個
-- **AI 失敗備援**：`db_loader.detect_scene()` 用關鍵字比對（舊邏輯，只在 AI 掛掉時觸發）
+- **AI 失敗備援**：`db_loader.detect_scene()` 用關鍵字比對（只在 AI 掛掉時觸發）
 
-### 4.3 TC4 評分
+### 4.3 TC4 評分（100 分往下扣）
 
-| 結果 | 分數 |
+**扣分比例：**
+
+| 結果 | 扣分比例 |
 |---|---|
-| 已達標 / 已完成 | 1.0 |
-| 部分達標 / 部分完成 | 0.5 |
-| 未達標 / 未完成 / 需補件 / 需確認 | 0.0 |
+| 已達標 / 已完成 | 0（不扣）|
+| 部分達標 / 部分完成 | 0.5（扣一半）|
+| 未達標 / 未完成 / 需補件 / 需確認 / 有問題 / 缺失資訊 | 1.0（全扣）|
 | 不適用 | 不計入 |
 
-加權由 `mention_count`（被 William 提及次數）決定：
+**加權**（依 William 提及次數）：
 
 | mention_count | 權重 |
 |---|---|
-| ≥ 6 | 1.5（HIGH）|
-| 4–5 | 1.2（MID）|
-| 1–3 | 1.0（LOW）|
-| 0   | 0.8（ZERO）|
+| ≥ 6 次 | 1.5（高）|
+| 4–5 次 | 1.2（中高）|
+| 1–3 次 | 1.0（中）|
+| 0 次 | 0.8（一般）|
 
-門檻：**70 分** 以上可找 William 老師開會。
+**公式：**
+```
+TC4 = 100 - (Σ 扣分比例 × 權重) / (Σ 計入項目的權重) × 100
+```
+
+全部達標 = **100 分**；門檻 **70 分**以上可找 William 老師開會。
 
 ---
 
@@ -142,69 +151,55 @@ FastAPI 路由：
 `/api/check` 接受的 Form 欄位：
 
 ```
-files[]             — 上傳檔案（可多個，.docx / .xlsx）
-member_name         — 學員姓名
-scene_hint          — 手動指定場景（空字串 = 自動辨識）
-context_input       — 學員說明文字
-api_provider        — "gemini" 或 "openai_compat"
-gemini_api_key      — Gemini API Key（可覆寫環境變數）
-gemini_model        — Gemini 模型名稱（可覆寫）
-third_party_key     — 第三方 API Key（sk-xxx）
-third_party_model   — 第三方模型名稱
-third_party_base_url— 第三方接口地址（預設 https://api.runapi.sbs/v1）
+files[]              — 上傳檔案（可多個，.docx / .xlsx）
+member_name          — 學員姓名
+scene_hint           — 手動指定場景（空字串 = 自動辨識）
+context_input        — 學員說明文字
+api_provider         — "gemini" 或 "openai_compat"
+gemini_api_key       — Gemini API Key（可覆寫環境變數）
+gemini_model         — Gemini 模型名稱（可覆寫）
+third_party_key      — 第三方 API Key（sk-xxx）
+third_party_model    — 第三方模型名稱
+third_party_base_url — 第三方接口地址（預設 https://api.runapi.sbs/v1）
 ```
+
+**注意**：`checker.run_check()` 整個呼叫包在 `try/except` 裡，任何後端錯誤都會回傳 `{"detail": "後端執行錯誤：..."}` JSON，不再讓 Render 回純文字 500。
 
 ### `backend/gemini_client.py`
 
-**`ALL_SCENES`**：21 個合法場景代碼的列表（與資料庫同步）。
+**`ALL_SCENES`**：21 個合法場景代碼的列表（與資料庫同步，若資料庫新增場景必須更新此處）。
 
-**`detect_scenes_ai(doc_text, ...)`**：第一輪 AI，輕量呼叫（max_tokens=512），讀完文件選出 3 個場景，回傳 `list[str]`。失敗時回傳 `["G. 專案管理基本功"]`。
+**`detect_scenes_ai(doc_text, ...)`**：第一輪 AI，輕量呼叫（max_tokens=512），讀完文件選出最多 3 個場景。失敗時回傳 `["G. 專案管理基本功"]`。
 
-**`build_prompt(doc_text, scenes, level, check_items, skill_context)`**：組成第二輪分析 prompt。指令邏輯：
-1. 先完整理解文件（含表格）
-2. 推論式對照（不需要明確標題關鍵字）
-3. 謹慎判定缺失（整份文件找不到才標未達標）
-4. 給具體可執行建議
+**`build_prompt(doc_text, scenes, level, check_items, skill_context)`**：第二輪分析 prompt，四步驟分析邏輯：理解 → 推論 → 謹慎判定 → 具體建議。
 
-**`_parse_json(raw)`**：容錯 JSON 解析：
-- 移除 markdown code fence
-- `rfind('\n{')` 跳過思考型模型輸出的前置文字
-- 截斷修復：找最後的 `}]` 補上 `overall_comment` 結尾
+**`_parse_json(raw)`**：三段容錯 JSON 解析：
+1. 移除 markdown fence + 跳過思考型模型前置文字（`rfind('\n{')`)
+2. 直接解析
+3. 找最後 `}]` 補 overall_comment 收尾（output 截斷修復）
+4. 找最後完整 item 的 `}` 補 `]` 收尾（更嚴重截斷修復）
 
-**`analyze(...)`**：第二輪 AI 呼叫，支援 Gemini 和 OpenAI-compat。
+**`analyze(...)`**：第二輪 AI，`max_output_tokens=32768`（Gemini flash 上限，避免截斷）。
 
 ### `backend/checker.py`
 
-**`extract_text_from_docx(file_bytes)`**：讀取 docx 的**段落 + 表格**（早期版本只讀段落，已修正）。
+**`extract_text_from_docx(file_bytes)`**：讀取 docx 的**段落 + 表格**（早期只讀段落，已修正，cf8abe3）。
 
-**`extract_text_from_xlsx(file_bytes)`**：讀取所有工作表。
+**`DEDUCT_RATIO`**：扣分比例表（取代舊的 RESULT_SCORES 正向給分）。
 
-**`run_check(...)`**：主流程，接受 `pre_extracted` 參數（已由 main.py 解析好的文字），執行兩輪 AI 分析。
+**`calculate_tc4_score()`**：100 分扣分制，公式見 4.3 節。
+
+**`run_check()`**：主流程，`ai_kwargs` 統一傳遞 API 參數給兩輪 AI。執行完後把 `mention_count` 和 `weight` 合併進每個 item，前端直接使用。
 
 ### `backend/db_loader.py`
 
-**`load_db()`**：讀取 `data/檢核資料庫.xlsx` 的「檢核資料庫」sheet，`@lru_cache` 快取。
+**`load_db()`**：`@lru_cache`，讀取 `data/檢核資料庫.xlsx`。
 
-**`get_all_scenes()`**：回傳資料庫中所有不重複場景，供 `/api/scenes` 使用。
+**`get_all_scenes()`**：回傳資料庫中所有不重複場景，供 `/api/scenes` 使用（不再用 config.py 的舊清單）。
 
-**`filter_items(scenes, level)`**：接受 `str` 或 `list[str]`，多場景合併去重。
+**`filter_items(scenes, level)`**：接受 `str` 或 `list[str]`，多場景合併去重，G 通用底層永遠包含。
 
 **`extract_skill_context(scenes, level)`**：從三份 Skill MD 萃取相關段落（各有字元上限）。
-
-**`detect_scene(text)`**：舊的關鍵字備援辨識，僅在 AI 辨識失敗時使用。
-
-### `backend/config.py`
-
-重要常數：
-
-```python
-GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-latest")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-TC4_THRESHOLD  = 70
-LEVEL_ORDER    = {"A": 3, "B": 2, "C": 1}
-```
-
-`SCENE_KEYWORDS`：舊的關鍵字辨識用，已不是主要場景辨識邏輯，但備援仍用。
 
 ### `frontend/index.html`
 
@@ -212,9 +207,10 @@ LEVEL_ORDER    = {"A": 3, "B": 2, "C": 1}
 - 提交後結果直接渲染在右欄，不跳頁
 - 場景下拉從 `/api/scenes` 動態載入（21 個真實場景）
 - `dropZone` 是 `<div onclick="...">` 而非 `<label>`（label 會破壞 drag-drop）
-- `fileInput` 有 `multiple` 屬性
+- `fileInput` 有 `multiple` 屬性，支援多檔上傳
 - 設定可存 `localStorage`（API key、模型等）
-- 篩選按鈕：全部 / 缺失資訊 / 部分達標 / 未達標 / 已達標 / 不適用
+- 每個項目卡片右上角顯示**權重標籤**（⚖️ 高×1.5 / 中高×1.2 / 中×1.0 / 一般×0.8）
+- fetch 改用 `resp.text()` 先讀再 `JSON.parse`，避免 502/503 純文字讓 `.json()` 爆炸
 
 ---
 
@@ -262,7 +258,7 @@ L. 做事標準框架
 M. 會議管理與追蹤
 ```
 
-> 注意：比賽類場景在資料庫是 `F. 競賽管理`，不是 `C. 比賽類專案`。`config.py` 裡的 `SCENE_KEYWORDS` 有舊的 `C. 比賽類專案` 是歷史遺留，已不是主要辨識來源。
+> 注意：比賽類場景在資料庫是 `F. 競賽管理`。`config.py` 裡的 `SCENE_KEYWORDS` 有舊的 `C. 比賽類專案` 是歷史遺留，備援辨識時可能誤判，但主流程已改由 AI 辨識，影響很小。
 
 ---
 
@@ -287,59 +283,51 @@ M. 會議管理與追蹤
 **推送流程**：
 ```bash
 cd /tmp/repo
+git pull origin main      # 先拉最新
+# 修改檔案...
+python3 -c "import ast; ast.parse(open('backend/xxx.py').read()); print('OK')"  # 驗語法
 git add .
 git commit -m "描述"
 git push origin main
-# Render 自動偵測 push，重新 build + deploy
+# Render 自動偵測 push，重新 build + deploy（約 2–3 分鐘）
 ```
 
-**Git token（歷史）**：
-- 過期 token：`ghp_DgynYKsJM2dAZ0bTVz5rMmzTB8mMON0pcDHm`（已失效）
-- 工作用 token：寫在 `/tmp/repo` 的 remote URL 中
+**重要：修改 Python 檔案用 heredoc，不要用 cp 覆蓋**（cp 會把 CRLF / 舊版本帶進去）：
+```bash
+cat > /tmp/repo/backend/xxx.py << 'PYEOF'
+# ... 完整檔案內容 ...
+PYEOF
+python3 -c "import ast; ast.parse(open('/tmp/repo/backend/xxx.py').read()); print('OK')"
+```
 
 ---
 
 ## 9. 已解決的重要 Bug
 
-### Bug 1：docx 表格內容未讀取
-**現象**：上傳以表格為主的 docx，AI 說「專案目的完全缺失」
-**原因**：`extract_text_from_docx` 只讀 `doc.paragraphs`，不讀 `doc.tables`
-**修正**（commit `cf8abe3`）：加入表格逐列讀取，欄位以 `|` 分隔
-
-### Bug 2：drag-drop 失效
-**現象**：拖放檔案沒反應
-**原因**：dropZone 用 `<label for="fileInput">` 時，dragover/drop 事件被吃掉
-**修正**：改用 `<div onclick="document.getElementById('fileInput').click()">`
-
-### Bug 3：第三方 API JSON "Extra data"
-**現象**：思考型模型在 JSON 前輸出推理文字，解析失敗
-**修正**：`_parse_json` 用 `rfind('\n{')` 找最後一個 JSON 起始點
-
-### Bug 4：第三方 API JSON "Expecting ','"
-**現象**：輸出 token 超限，JSON 被截斷
-**修正**：`max_tokens=16000` + 截斷修復邏輯（找 `}]` 補尾）
-
-### Bug 5：場景誤判（e.g. 比賽文件被判為其他場景）
-**原因**：程式關鍵字辨識能力有限，21 個場景中有複雜子分類
-**修正**（commit `b6a0c05`）：改成兩輪 AI，第一輪 AI 讀文件選 3 個場景，不再靠關鍵字猜測
+| commit | 問題 | 修法 |
+|---|---|---|
+| `cf8abe3` | docx 以表格為主的文件被 AI 誤判「目的缺失」 | `extract_text_from_docx` 加入 `doc.tables` 讀取 |
+| `b6a0c05` | 程式關鍵字猜場景不準，容易誤判 | 改成第一輪 AI 讀文件選 3 個場景 |
+| `1431eb8` | `detect_scenes_ai` 被 cp 覆蓋消失，部署後立即 500 | 用 heredoc 完整重寫，禁止用 cp 覆蓋 |
+| `4a79204` | Gemini 回傳截斷（JSON 找不到結尾）| `max_output_tokens` 8192→32768，三段截斷修復 |
+| `49ef356` | Render 502 純文字讓前端 `resp.json()` 爆炸 | 改用 `resp.text()` 先讀再 `JSON.parse` |
+| `a10d159` | main.py traceback f-string 內換行 SyntaxError | 改用字串相加 |
+| `8a3ed1a` | TC4 是 0 分往上加，與設計相反 | 改為 100 分往下扣，未達標依權重扣分 |
+| `fb650fb` | 無法看出哪些項目優先改 | 結果卡片加權重標籤（⚖️ 高/中高/中/一般）|
 
 ---
 
 ## 10. 已知問題 / 待辦
 
-- [ ] **`result.html` 統計標籤未更新**：前端 `STAT_LABELS` 還用舊標籤（已完成/部分完成），但 AI 現在回傳「已達標/部分達標」，統計欄位顯示會是空 emoji
-- [ ] **`config.py` 的 `SCENE_KEYWORDS` 與資料庫場景代碼不一致**（`C. 比賽類專案` vs `F. 競賽管理`）：關鍵字備援仍可能誤判，但已不影響主流程
-- [ ] **Render free tier 無持久化 SQLite**：每次重新部署歷史記錄會消失，若需要持久化需接 PostgreSQL
-- [ ] **`models.py` 未存 `scenes_used`**：新版回傳 `scenes_used`（3 個場景），但 DB 模型沒有此欄位，歷史查詢時此欄位遺失
-- [ ] **前端場景下拉僅支援單選**：現在 AI 自動選 3 個場景，但 member 手動只能選 1 個，未來可考慮多選
+- [ ] **`result.html` 統計標籤未更新**：`STAT_LABELS` 還用舊標籤（已完成/部分完成），但 AI 現在回傳「已達標/部分達標」，統計欄位 emoji 會空白
+- [ ] **`config.py` 的 `SCENE_KEYWORDS` 與資料庫場景代碼不一致**：關鍵字備援可能誤判，主流程已不影響
+- [ ] **Render free tier 無持久化 SQLite**：每次重新部署歷史記錄消失，需要持久化請接 PostgreSQL（設定 `DATABASE_URL` 環境變數）
+- [ ] **`models.py` 未存 `scenes_used` 和 `mention_count/weight`**：新欄位沒有進 DB，歷史查詢時這些資料遺失
+- [ ] **前端場景下拉只能單選**：AI 自動選 3 個場景，但 member 手動只能選 1 個
 
 ---
 
 ## 11. 接手開發注意事項
 
-1. **改 Python 檔案務必用 heredoc**（`cat > file << 'EOF'`），不要用 Write tool 直接寫，容易 CRLF / 截斷造成 SyntaxError
-2. **改完後驗語法**：`python3 -c "import ast; ast.parse(open('file.py').read()); print('OK')"`
-3. **`/tmp/repo`** 是 git clone 的副本，改完 copy 過去再 push
-4. **`gemini_client.py` 的 `ALL_SCENES`** 要和資料庫同步，若資料庫新增場景記得更新
-5. **兩輪 AI 的 token 消耗**：第一輪 512 tokens（場景辨識），第二輪最多 8192 tokens（完整分析），Gemini free tier 每分鐘有 RPM 限制，測試時注意
-6. **Render cold start**：閒置後第一次請求約等 30–60 秒，這不是 bug
+1. **改 Python 檔案必須用 heredoc**，禁止用 `cp` 從本地覆蓋 `/tmp/repo`，否則會把舊版本或 CRLF 帶進去
+2. **改完立即驗語法**：`python3 -c "import as
