@@ -20,7 +20,18 @@ from config import TC4_THRESHOLD, LEVEL_ORDER
 
 def extract_text_from_docx(file_bytes: bytes) -> str:
     doc = DocxDocument(io.BytesIO(file_bytes))
-    return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+    parts = []
+    # 段落文字
+    for p in doc.paragraphs:
+        if p.text.strip():
+            parts.append(p.text)
+    # 表格文字（逐列合併，以 | 分隔欄位）
+    for table in doc.tables:
+        for row in table.rows:
+            row_text = "  |  ".join(c.text.strip() for c in row.cells if c.text.strip())
+            if row_text:
+                parts.append(row_text)
+    return "\n".join(parts)
 
 
 def extract_text_from_xlsx(file_bytes: bytes) -> str:
