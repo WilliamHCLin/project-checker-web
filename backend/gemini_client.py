@@ -142,6 +142,7 @@ def _parse_json(raw: str) -> dict:
     # 最後回退：回傳錯誤訊息含原始前200字
     try:
         json.loads(candidate)
+        return {"error": "未知解析錯誤"}
     except json.JSONDecodeError as e:
         return {"error": f"JSON 解析失敗：{e}。原始內容前200字：{candidate[:200]}"}
 
@@ -182,5 +183,4 @@ def analyze(
     skill_context: str,
     api_key: str = None,
     model_override: str = None,
-    provider: str = "gemini",
-    third_party_key
+  
