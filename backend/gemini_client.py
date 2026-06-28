@@ -15,7 +15,7 @@ from google.genai import types
 from config import GEMINI_API_KEY, GEMINI_MODEL
 
 
-# ─── Gemini client 快取 ───────────────────────────────────────────────
+# --- Gemini client 快取 ---
 
 _clients: dict = {}
 
@@ -25,15 +25,9 @@ def _get_gemini_client(api_key: str):
     return _clients[api_key]
 
 
-# ─── Prompt 建構 ─────────────────────────────────────────────────────
+# --- Prompt 建構 ---
 
-def build_prompt(
-    doc_text: str,
-    scene: str,
-    level: str,
-    check_items: list,
-    skill_context: str,
-) -> str:
+def build_prompt(doc_text, scene, level, check_items, skill_context):
     items_text = ""
     for it in check_items:
         items_text += (
@@ -68,7 +62,7 @@ def build_prompt(
 3. 整體評估：指出最大問題
 4. 補件清單：使用「你需要補充：XXX」格式，不要說「可以考慮」等模糊語氣
 
-請輸出純 JSON（不要加任何 markdown code block 或 ```json 標記），格式如下：
+請直接輸出純 JSON，不要輸出任何思考過程或說明文字，格式如下：
 {{
   "scene_confirmed": "場景名稱",
   "level_confirmed": "A或B或C",
@@ -89,12 +83,14 @@ def build_prompt(
 """
 
 
+# --- JSON 解析（容錯） ---
+
 def _parse_json(raw: str) -> dict:
     """
     從原始文字中提取最後一個完整 JSON 物件。
     - 移除 markdown code fence
-    - 跳過模型的思考過程文字（取最後一個 { 開始的區塊）
-    - 若截斷（Expecting ',' 等），嘗試在最後一個完整項目處截斷修補
+    - 跳過模型思考過程文字（找最後一個換行後的 { 開始）
+    - 若截斷，嘗試在最後完整 item 處補尾
     """
     if not raw or not raw.strip():
         return {"error": "AI 回傳空白內容，請換模型或稍後再試"}
@@ -104,8 +100,7 @@ def _parse_json(raw: str) -> dict:
     text = re.sub(r'```\s*', '', text)
     text = text.strip()
 
-    # 找最後一個 { 開始（跳過思考過程）
-    # 策略：找所有 { 位置，從後往前找能成功解析的最長 JSON
+    # 找最後一個以換行開頭的 {（跳過思考過程）
     start = text.rfind('\n{')
     if start == -1:
         start = text.find('{')
@@ -127,11 +122,9 @@ def _parse_json(raw: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # 第二次嘗試：JSON 被截斷 → 在最後一個完整的 }] 或 } 處補上收尾
-    # 找最後一個完整的 item（以 }] 結束的位置）
+    # 第二次嘗試：JSON 被截斷 → 找最後完整 item（}] 結尾）補收尾
     last_complete = candidate.rfind('}]')
     if last_complete != -1:
-        # 截到最後完整 item，補上 overall_comment 和收尾
         truncated = candidate[:last_complete+2]
         repaired = truncated + ', "overall_comment": "（AI 輸出被截斷，以下為部分結果）"}'
         try:
@@ -139,22 +132,16 @@ def _parse_json(raw: str) -> dict:
         except json.JSONDecodeError:
             pass
 
-    # 最後回退：回傳錯誤訊息含原始前200字
+    # 最後回退
     try:
-        json.loads(candidate)
-        return {"error": "未知解析錯誤"}
+        return json.loads(candidate)
     except json.JSONDecodeError as e:
         return {"error": f"JSON 解析失敗：{e}。原始內容前200字：{candidate[:200]}"}
 
 
-# ─── 第三方 OpenAI-compatible API ────────────────────────────────────
+# --- 第三方 OpenAI-compatible API ---
 
-def _call_openai_compatible(
-    prompt: str,
-    api_key: str,
-    model: str,
-    base_url: str = "https://api.runapi.sbs/v1",
-) -> dict:
+def _call_openai_compatible(prompt, api_key, model, base_url="https://api.runapi.sbs/v1"):
     try:
         from openai import OpenAI
     except ImportError:
@@ -173,14 +160,52 @@ def _call_openai_compatible(
         return {"error": str(e)}
 
 
-# ─── 主入口 ──────────────────────────────────────────────────────────
+# --- 主入口 ---
 
 def analyze(
-    doc_text: str,
-    scene: str,
-    level: str,
-    check_items: list,
-    skill_context: str,
-    api_key: str = None,
-    model_override: str = None,
-  
+    doc_text,
+    scene,
+    level,
+    check_items,
+    skill_context,
+    api_key=None,
+    model_override=None,
+    provider="gemini",
+    third_party_key=None,
+    third_party_model=None,
+    third_party_base_url="https://api.runapi.sbs/v1",
+):
+    prompt = build_prompt(doc_text, scene, level, check_items, skill_context)
+
+    if provider == "openai_compat":
+        if not third_party_key:
+            return {"error": "請填入第三方 API Key"}
+        if not third_party_model:
+            return {"error": "請填入第三方模型名稱"}
+        return _call_openai_compatible(
+            prompt=prompt,
+            api_key=third_party_key,
+            model=third_party_model,
+            base_url=third_party_base_url,
+        )
+
+    # Gemini
+    effective_key   = api_key or GEMINI_API_KEY
+    effective_model = model_override or GEMINI_MODEL
+
+    if not effective_key:
+        return {"error": "GEMINI_API_KEY 未設定，請填入你的 API Key"}
+
+    try:
+        client = _get_gemini_client(effective_key)
+        resp = client.models.generate_content(
+            model=effective_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                max_output_tokens=8192,
+            ),
+        )
+        return _parse_json(resp.text or "")
+    except Exception as e:
+        return {"error": str(e)}
