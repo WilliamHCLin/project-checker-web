@@ -107,8 +107,7 @@ async def api_check(
     except Exception as e:
         import traceback
         tb = traceback.format_exc()
-        raise HTTPException(500, detail=f"後端執行錯誤：{e}
-{tb[-800:]}")
+        raise HTTPException(500, detail="後端執行錯誤：" + str(e) + " | " + tb[-400:])
 
     if "error" in result:
         raise HTTPException(500, detail=result["error"])
