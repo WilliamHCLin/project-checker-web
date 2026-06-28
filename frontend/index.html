@@ -386,9 +386,15 @@ async function submitCheck() {
 
   try {
     const resp = await fetch('/api/check', { method: 'POST', body: fd });
-    const data = await resp.json();
     clearInterval(tipTimer);
-    if (!resp.ok) throw new Error(data.detail || '檢核失敗');
+    const rawText = await resp.text();
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch (_) {
+      throw new Error('伺服器回傳非預期內容：' + rawText.slice(0, 120));
+    }
+    if (!resp.ok) throw new Error(data.detail || data.error || '檢核失敗');
     renderResult(data);
   } catch (err) {
     clearInterval(tipTimer);
