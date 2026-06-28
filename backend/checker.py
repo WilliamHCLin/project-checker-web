@@ -59,51 +59,59 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
 
 # --- TC4 評分 ---
 
-RESULT_SCORES = {
-    "已達標":   1.0,
-    "已完成":   1.0,
+# 扣分比例（0 = 不扣，0.5 = 扣一半，1.0 = 全扣）
+DEDUCT_RATIO = {
+    "已達標":   0.0,
+    "已完成":   0.0,
     "部分達標": 0.5,
     "部分完成": 0.5,
-    "未達標":   0.0,
-    "未完成":   0.0,
-    "需補件":   0.0,
-    "需確認":   0.0,
-    "不適用":   None,
+    "未達標":   1.0,
+    "未完成":   1.0,
+    "需補件":   1.0,
+    "需確認":   1.0,
+    "有問題":   1.0,
+    "缺失資訊": 1.0,
+    "不適用":   None,  # 不計入
 }
 
 
 def calculate_tc4_score(items_result: list, db_items: list) -> dict:
+    """
+    100 分往下扣：
+      TC4 = 100 - (Σ 扣分權重) / (Σ 計入項目權重) × 100
+    全部達標 = 100 分；每個未達標項依權重扣分。
+    """
     db_map = {it["seq"]: it for it in db_items}
-    weighted_sum = 0.0
+    deduct_sum   = 0.0
     weight_total = 0.0
     detail = []
 
     for res in items_result:
-        seq        = res.get("seq")
-        result     = res.get("result", "未達標")
-        base_score = RESULT_SCORES.get(result)
+        seq    = res.get("seq")
+        result = res.get("result", "未達標")
+        ratio  = DEDUCT_RATIO.get(result)
 
-        if base_score is None:
-            continue
+        if ratio is None:
+            continue  # 不適用，跳過
 
         db_item = db_map.get(seq, {})
         mention = db_item.get("mention_count", 0)
         weight  = get_mention_weight(mention)
 
-        weighted_sum += base_score * weight
+        deduct_sum   += ratio * weight
         weight_total += weight
         detail.append({
             "seq":    seq,
             "item":   res.get("item", ""),
             "result": result,
             "weight": weight,
-            "score":  round(base_score * weight, 2),
+            "deduct": round(ratio * weight, 2),
         })
 
     if weight_total == 0:
-        final_score = 0.0
+        final_score = 100.0
     else:
-        final_score = round((weighted_sum / weight_total) * 100, 1)
+        final_score = round(max(0.0, 100.0 - (deduct_sum / weight_total) * 100), 1)
 
     return {
         "score":  final_score,
