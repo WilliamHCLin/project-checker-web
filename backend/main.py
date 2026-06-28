@@ -89,23 +89,29 @@ async def api_check(
         raise HTTPException(400, "請上傳規劃文件，或填入說明文字")
 
     # 執行檢核
-    result = checker.run_check(
-        file_bytes           = b"",
-        filename             = filename,
-        scene_hint           = scene_hint,
-        member_name          = member_name,
-        context_input        = context_input,
-        gemini_api_key       = gemini_api_key or None,
-        gemini_model         = gemini_model or None,
-        pre_extracted        = combined_doc_text or None,
-        api_provider         = api_provider or "gemini",
-        third_party_key      = third_party_key or None,
-        third_party_model    = third_party_model or None,
-        third_party_base_url = third_party_base_url or "https://api.runapi.sbs/v1",
-    )
+    try:
+        result = checker.run_check(
+            file_bytes           = b"",
+            filename             = filename,
+            scene_hint           = scene_hint,
+            member_name          = member_name,
+            context_input        = context_input,
+            gemini_api_key       = gemini_api_key or None,
+            gemini_model         = gemini_model or None,
+            pre_extracted        = combined_doc_text or None,
+            api_provider         = api_provider or "gemini",
+            third_party_key      = third_party_key or None,
+            third_party_model    = third_party_model or None,
+            third_party_base_url = third_party_base_url or "https://api.runapi.sbs/v1",
+        )
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        raise HTTPException(500, detail=f"後端執行錯誤：{e}
+{tb[-800:]}")
 
     if "error" in result:
-        raise HTTPException(500, result["error"])
+        raise HTTPException(500, detail=result["error"])
 
     # 存歷史記錄
     try:
