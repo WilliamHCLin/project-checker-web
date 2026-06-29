@@ -117,6 +117,10 @@
             class="flex-1 py-1.5 rounded-lg border-2 border-indigo-600 bg-indigo-600 text-white text-xs font-medium transition">
             Google Gemini
           </button>
+          <button type="button" id="btnProviderGroq" onclick="switchProvider('groq')"
+            class="flex-1 py-1.5 rounded-lg border-2 border-gray-300 bg-white text-gray-600 text-xs font-medium transition">
+            Groq（免費）
+          </button>
           <button type="button" id="btnProviderThird" onclick="switchProvider('openai_compat')"
             class="flex-1 py-1.5 rounded-lg border-2 border-gray-300 bg-white text-gray-600 text-xs font-medium transition">
             第三方 API
@@ -141,6 +145,28 @@
               <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b（最不容易 503）</option>
               <option value="gemini-flash-latest">gemini-flash-latest（自動最新）</option>
               <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview（最強）</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Groq -->
+        <div id="sectionGroq" class="hidden">
+          <div class="mb-2">
+            <label class="block text-xs font-medium text-gray-700 mb-1">Groq API Key</label>
+            <div class="relative">
+              <input id="groqApiKey" type="password" placeholder="gsk_xxxxxxxx"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <button type="button" onclick="toggleVis('groqApiKey')" class="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 text-xs">&#128065;</button>
+            </div>
+            <a href="https://console.groq.com/keys" target="_blank" class="text-xs text-indigo-500 hover:underline mt-1 inline-block">取得免費 Groq API Key &rarr;</a>
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">模型</label>
+            <select id="groqModel" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+              <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile（推薦，免費）</option>
+              <option value="llama-3.1-8b-instant">llama-3.1-8b-instant（最快）</option>
+              <option value="mixtral-8x7b-32768">mixtral-8x7b-32768（長文）</option>
+              <option value="gemma2-9b-it">gemma2-9b-it（Google 開源）</option>
             </select>
           </div>
         </div>
@@ -281,13 +307,14 @@ fetch('/api/scenes').then(r => r.json()).then(data => {
 let currentProvider = 'gemini';
 function switchProvider(p) {
   currentProvider = p;
-  const isG = p === 'gemini';
-  document.getElementById('sectionGemini').classList.toggle('hidden', !isG);
-  document.getElementById('sectionThird').classList.toggle('hidden', isG);
   const on  = 'flex-1 py-1.5 rounded-lg border-2 border-indigo-600 bg-indigo-600 text-white text-xs font-medium transition';
   const off = 'flex-1 py-1.5 rounded-lg border-2 border-gray-300 bg-white text-gray-600 text-xs font-medium transition';
-  document.getElementById('btnProviderGemini').className = isG ? on : off;
-  document.getElementById('btnProviderThird').className  = isG ? off : on;
+  document.getElementById('sectionGemini').classList.toggle('hidden', p !== 'gemini');
+  document.getElementById('sectionGroq').classList.toggle('hidden',   p !== 'groq');
+  document.getElementById('sectionThird').classList.toggle('hidden',  p !== 'openai_compat');
+  document.getElementById('btnProviderGemini').className = p === 'gemini'        ? on : off;
+  document.getElementById('btnProviderGroq').className   = p === 'groq'          ? on : off;
+  document.getElementById('btnProviderThird').className  = p === 'openai_compat' ? on : off;
 }
 
 // 還原設定
@@ -296,6 +323,8 @@ window.addEventListener('DOMContentLoaded', () => {
   if (v('gemini_api_key')) document.getElementById('geminiApiKey').value = v('gemini_api_key');
   if (v('gemini_model'))   document.getElementById('geminiModel').value  = v('gemini_model');
   if (v('api_provider'))   switchProvider(v('api_provider'));
+  if (v('groq_api_key'))   document.getElementById('groqApiKey').value   = v('groq_api_key');
+  if (v('groq_model'))     document.getElementById('groqModel').value    = v('groq_model');
   if (v('third_api_key'))  document.getElementById('thirdApiKey').value  = v('third_api_key');
   if (v('third_model'))    document.getElementById('thirdModel').value   = v('third_model');
   if (v('third_base_url')) document.getElementById('thirdBaseUrl').value = v('third_base_url');
@@ -345,12 +374,17 @@ async function submitCheck() {
   const contextInput = document.getElementById('contextInput').value.trim();
   const apiKey       = document.getElementById('geminiApiKey').value.trim();
   const remember     = document.getElementById('rememberSettings').checked;
+  const groqKey      = document.getElementById('groqApiKey').value.trim();
+  const groqModel    = document.getElementById('groqModel').value.trim();
   const thirdKey     = document.getElementById('thirdApiKey').value.trim();
   const thirdModel   = document.getElementById('thirdModel').value.trim();
   const thirdUrl     = document.getElementById('thirdBaseUrl').value.trim();
 
   if (!selectedFiles.length && !contextInput) {
     showError('請上傳檔案，或在「說明」方塊填入內容'); return;
+  }
+  if (currentProvider === 'groq' && !groqKey) {
+    showError('請填入 Groq API Key'); return;
   }
   if (currentProvider === 'openai_compat') {
     if (!thirdKey)   { showError('請填入第三方 API Key'); return; }
@@ -361,6 +395,8 @@ async function submitCheck() {
     localStorage.setItem('api_provider', currentProvider);
     if (apiKey)     localStorage.setItem('gemini_api_key', apiKey);
     localStorage.setItem('gemini_model', document.getElementById('geminiModel').value);
+    if (groqKey)    localStorage.setItem('groq_api_key', groqKey);
+    localStorage.setItem('groq_model', groqModel);
     if (thirdKey)   localStorage.setItem('third_api_key', thirdKey);
     if (thirdModel) localStorage.setItem('third_model', thirdModel);
     if (thirdUrl)   localStorage.setItem('third_base_url', thirdUrl);
@@ -373,12 +409,20 @@ async function submitCheck() {
   fd.append('member_name',        memberName);
   fd.append('scene_hint',         sceneHint);
   fd.append('context_input',      contextInput);
-  fd.append('api_provider',       currentProvider);
+  // Groq 走 openai_compat 路徑，直接把參數填好送後端
+  const effectiveProvider = currentProvider === 'groq' ? 'openai_compat' : currentProvider;
+  fd.append('api_provider',       effectiveProvider);
   fd.append('gemini_model',       document.getElementById('geminiModel').value);
   if (apiKey)     fd.append('gemini_api_key',       apiKey);
-  if (thirdKey)   fd.append('third_party_key',      thirdKey);
-  if (thirdModel) fd.append('third_party_model',    thirdModel);
-  if (thirdUrl)   fd.append('third_party_base_url', thirdUrl);
+  if (currentProvider === 'groq') {
+    fd.append('third_party_key',      groqKey);
+    fd.append('third_party_model',    groqModel);
+    fd.append('third_party_base_url', 'https://api.groq.com/openai/v1');
+  } else {
+    if (thirdKey)   fd.append('third_party_key',      thirdKey);
+    if (thirdModel) fd.append('third_party_model',    thirdModel);
+    if (thirdUrl)   fd.append('third_party_base_url', thirdUrl);
+  }
 
   const tips = ['AI 正在閱讀你的文件…','對照 437 筆檢核項目中…','辨識場景與層級…','分析落差與缺口…','生成補件建議清單…','計算 TC4 評分…'];
   let tipIdx = 0;
