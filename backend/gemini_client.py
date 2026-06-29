@@ -254,18 +254,24 @@ def detect_scenes_ai(
         if "G. 專案管理基本功" not in scenes:
             scenes.append("G. 專案管理基本功")
 
-        # 把層級和 scope_flags 存回 result 供 checker.py 使用
-        result["_scenes"] = scenes
-        result["_level"] = result.get("level", "")
-        result["_scope_flags"] = result.get("scope_flags", [])
-        return scenes
+        return {
+            "_scenes":      scenes,
+            "level":        result.get("level", "B"),
+            "level_reason": result.get("level_reason", ""),
+            "scope_flags":  result.get("scope_flags", []),
+        }
 
     except Exception:
         pass
 
     # 回退：關鍵字比對
     fallback = detect_scene(doc_text)
-    return [fallback["scene"], "G. 專案管理基本功"]
+    return {
+        "_scenes":      [fallback["scene"], "G. 專案管理基本功"],
+        "level":        fallback.get("level", "B"),
+        "level_reason": "AI 辨識失敗，改用關鍵字比對",
+        "scope_flags":  [],
+    }
 
 
 # ── 第二輪：完整分析 ──────────────────────────────────────────────
@@ -421,7 +427,4 @@ def analyze(
         except Exception as e:
             last_err = e
             err_str = str(e)
-            if "503" in err_str or "UNAVAILABLE" in err_str or "quota" in err_str.lower():
-                continue
-            return {"error": err_str}
-    return {"error": str(last_err)}
+            if "
