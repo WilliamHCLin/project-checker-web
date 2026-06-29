@@ -201,4 +201,31 @@ def analyze(
         if not third_party_key:
             return {"error": "請填入第三方 API Key"}
         if not third_party_model:
-            return {"error": "
+            return {"error": "請填入第三方模型名稱"}
+        return _call_openai_compatible(
+            prompt=prompt,
+            api_key=third_party_key,
+            model=third_party_model,
+            base_url=third_party_base_url,
+        )
+
+    # Gemini
+    effective_key   = api_key or GEMINI_API_KEY
+    effective_model = model_override or GEMINI_MODEL
+
+    if not effective_key:
+        return {"error": "GEMINI_API_KEY 未設定，請填入你的 API Key"}
+
+    try:
+        client = _get_gemini_client(effective_key)
+        resp = client.models.generate_content(
+            model=effective_model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                max_output_tokens=8192,
+            ),
+        )
+        return _parse_json(resp.text or "")
+    except Exception as e:
+        return {"error": str(e)}

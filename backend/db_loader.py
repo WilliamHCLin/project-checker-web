@@ -205,4 +205,28 @@ def detect_scene(text: str) -> dict:
     """
     text_lower = text.lower()
     scores: dict[str, int] = {}
-    matched_kw: dict[str, list] = {
+    matched_kw: dict[str, list] = {}
+
+    for scene_code, keywords in SCENE_KEYWORDS.items():
+        hits = [kw for kw in keywords if kw in text_lower or kw in text]
+        scores[scene_code]    = len(hits)
+        matched_kw[scene_code] = hits
+
+    best_scene = max(scores, key=scores.get) if scores else "G. 專案管理基本功"
+    best_score = scores.get(best_scene, 0)
+    confidence = min(int(best_score / max(len(SCENE_KEYWORDS.get(best_scene, [1])), 1) * 100), 100)
+
+    # 層級判斷
+    level_scores: dict[str, int] = {}
+    for lv, kws in LEVEL_KEYWORDS.items():
+        level_scores[lv] = sum(1 for kw in kws if kw in text)
+    best_level = max(level_scores, key=level_scores.get) if level_scores else "B"
+    if level_scores.get("A", 0) == 0 and level_scores.get("B", 0) == 0:
+        best_level = "C"
+
+    return {
+        "scene":       best_scene,
+        "level":       best_level,
+        "confidence":  confidence,
+        "matched_kws": matched_kw.get(best_scene, []),
+    }
