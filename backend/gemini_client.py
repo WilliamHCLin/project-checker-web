@@ -427,4 +427,8 @@ def analyze(
         except Exception as e:
             last_err = e
             err_str = str(e)
-            if "
+            if "503" in err_str or "429" in err_str or "overloaded" in err_str.lower():
+                continue  # 試下一個模型
+            break  # 其他錯誤直接中止
+
+    return {"error": f"所有模型均失敗：{last_err}"}
