@@ -264,6 +264,9 @@ const STAT_LABELS = { "已完成":"✅","部分完成":"⚠️","未完成":"❌
 
 let allItems = [];
 
+// 頁面載入時先 ping 後端，喚醒 Render 冷啟動實例
+fetch('/api/health').catch(() => {});
+
 // 場景清單
 fetch('/api/scenes').then(r => r.json()).then(data => {
   const sel = document.getElementById('sceneSelect');
@@ -384,16 +387,36 @@ async function submitCheck() {
     document.getElementById('progressSub').textContent = tips[tipIdx];
   }, 3000);
 
-  try {
-    const resp = await fetch('/api/check', { method: 'POST', body: fd });
-    const data = await resp.json();
-    clearInterval(tipTimer);
-    if (!resp.ok) throw new Error(data.detail || '檢核失敗');
-    renderResult(data);
-  } catch (err) {
+  // 自動重試（Render 免費方案冷啟動會 503/504）
+  const MAX_RETRY = 3;
+  let lastErr = null;
+  for (let attempt = 1; attempt <= MAX_RETRY; attempt++) {
+    try {
+      if (attempt > 1) {
+        document.getElementById('progressSub').textContent =
+          `伺服器啟動中，第 ${attempt}/${MAX_RETRY} 次重試…（冷啟動需 30-60 秒）`;
+        await new Promise(r => setTimeout(r, 8000));
+      }
+      const resp = await fetch('/api/check', { method: 'POST', body: fd });
+      if ((resp.status === 503 || resp.status === 504) && attempt < MAX_RETRY) {
+        lastErr = new Error(`伺服器暫時無回應 (${resp.status})，正在重試…`);
+        continue;
+      }
+      const data = await resp.json();
+      clearInterval(tipTimer);
+      if (!resp.ok) throw new Error(data.detail || '檢核失敗');
+      renderResult(data);
+      lastErr = null;
+      break;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === MAX_RETRY) break;
+    }
+  }
+  if (lastErr) {
     clearInterval(tipTimer);
     setLoading(false);
-    showError('&#10060; ' + err.message);
+    showError('&#10060; ' + lastErr.message);
   }
 }
 
@@ -448,27 +471,11 @@ function renderItems(items) {
   items.forEach(it => {
     const cfg = RESULT_CONFIG[it.result] || { bg:'bg-gray-50', border:'border-gray-200', tag:'tag-na', emoji:'?' };
     const missing = (it.missing || []).map(m => `<li class="ml-4">${m}</li>`).join('');
-
-    // 權重標籤
-    const w = it.weight || 0;
-    const m = it.mention_count || 0;
-    let wColor = 'bg-gray-100 text-gray-500';
-    let wLabel = '一般';
-    if (w >= 1.5)      { wColor = 'bg-red-100 text-red-700';       wLabel = '高'; }
-    else if (w >= 1.2) { wColor = 'bg-orange-100 text-orange-700'; wLabel = '中高'; }
-    else if (w >= 1.0) { wColor = 'bg-yellow-100 text-yellow-700'; wLabel = '中'; }
-    const wBadge = w > 0
-      ? `<span class="${wColor} text-xs px-1.5 py-0.5 rounded font-medium" title="William 提及 ${m} 次，計分權重 ${w}">⚖️ ${wLabel} ×${w}</span>`
-      : '';
-
     list.innerHTML += `
       <div class="item-card ${cfg.bg} border ${cfg.border} rounded-xl p-4" data-result="${it.result}">
         <div class="flex items-start justify-between gap-2 mb-1">
           <p class="font-semibold text-gray-800 text-sm">${cfg.emoji} <span class="text-gray-400 text-xs mr-1">序${it.seq}</span>${it.item}</p>
-          <div class="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-            ${wBadge}
-            <span class="text-xs font-bold px-2 py-0.5 rounded-full ${cfg.tag}">${it.result}</span>
-          </div>
+          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full ${cfg.tag}">${it.result}</span>
         </div>
         ${it.evidence && it.evidence !== '文件未提及' ? `<p class="text-xs text-gray-400 italic mb-1">"${it.evidence}"</p>` : ''}
         ${missing ? `<ul class="text-sm text-blue-900 mt-1 list-disc">${missing}</ul>` : ''}
