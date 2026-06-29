@@ -39,20 +39,27 @@ def _parse_json(raw: str) -> dict:
         return {"error": f"AI 回傳非 JSON 格式：{text[:200]}"}
 
     end = text.rfind('}')
-    if end == -1 or end < start:
-        return {"error": f"AI 回傳非 JSON 格式（找不到結尾）：{text[:200]}"}
-
-    candidate = text[start:end+1]
+    # 找不到結尾：AI 輸出被截斷，用不完整原始文字嘗試修復
+    candidate = text[start:end+1] if (end != -1 and end >= start) else text[start:]
 
     try:
         return json.loads(candidate)
     except json.JSONDecodeError:
         pass
 
+    # 修復策略1：找最後一個完整 item 結尾 }]，補上外層 }
     last_complete = candidate.rfind('}]')
     if last_complete != -1:
-        truncated = candidate[:last_complete+2]
-        repaired = truncated + ', "overall_comment": "(AI 輸出被截斷)"}'
+        repaired = candidate[:last_complete+2] + ', "overall_comment": "(AI 輸出被截斷，部分項目省略)"}'
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            pass
+
+    # 修復策略2：找最後一個完整 item 的 "}，補上 ]} 收尾
+    last_item = candidate.rfind('"}')
+    if last_item != -1:
+        repaired = candidate[:last_item+2] + '], "overall_comment": "(AI 輸出被截斷，部分項目省略)"}'
         try:
             return json.loads(repaired)
         except json.JSONDecodeError:
