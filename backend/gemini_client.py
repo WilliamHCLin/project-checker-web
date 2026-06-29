@@ -109,9 +109,19 @@ def detect_scenes_ai(
     from db_loader import detect_scene
 
     prompt = (
-        "你是生命動能協會 AI 助手。請分析以下文件，從場景列表中選出最相關的 1-3 個場景。\n\n"
+        "你是生命動能協會 AI 助手。\n"
+        "請先完整閱讀以下文件（包含所有段落與表格），理解：\n"
+        "1. 這份文件的功能與目的（它要做什麼事？）\n"
+        "2. 文件的整體架構與設計邏輯\n"
+        "3. 使用者（member）目前在做什麼、在哪個執行階段\n"
+        "4. 涉及哪些人、哪些組織、哪些資源\n\n"
+        "在充分理解文件後，從下方場景列表中選出最相關的 1-3 個場景。\n"
+        "選擇原則：\n"
+        "- 選最能描述這份文件「主要任務」的場景\n"
+        "- 若文件同時涉及多個場景，可選 2-3 個，但不要為了涵蓋而過度選取\n"
+        "- G. 專案管理基本功 只在文件明確以專案規劃為主體時才選\n\n"
         "【可選場景】\n" + SCENE_LIST_TEXT + "\n\n"
-        "【文件內容（前3000字）】\n" + doc_text[:3000] + "\n\n"
+        "【完整文件內容】\n" + doc_text[:80000] + "\n\n"
         "請直接輸出純 JSON：{\"scenes\": [\"A. 班級日常管理\"]}"
     )
 
@@ -129,7 +139,8 @@ def detect_scenes_ai(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    max_output_tokens=256,
+                    max_output_tokens=512,
+                    temperature=0.1,
                 ),
             )
             result = _parse_json(resp.text or "")
@@ -270,6 +281,7 @@ def analyze(
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     max_output_tokens=8192,
+                    temperature=0.1,
                 ),
             )
             return _parse_json(resp.text or "")
