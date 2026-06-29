@@ -255,16 +255,28 @@ def analyze(
     if not effective_key:
         return {"error": "GEMINI_API_KEY 未設定，請填入你的 API Key"}
 
-    try:
-        client = _get_gemini_client(effective_key)
-        resp = client.models.generate_content(
-            model=effective_model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                max_output_tokens=8192,
-            ),
-        )
-        return _parse_json(resp.text or "")
-    except Exception as e:
-        return {"error": str(e)}
+    FALLBACK_MODELS = [
+        effective_model,
+        "gemini-1.5-flash",
+        "gemini-1.5-flash-8b",
+    ]
+    last_err = None
+    for model_try in FALLBACK_MODELS:
+        try:
+            client = _get_gemini_client(effective_key)
+            resp = client.models.generate_content(
+                model=model_try,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    max_output_tokens=8192,
+                ),
+            )
+            return _parse_json(resp.text or "")
+        except Exception as e:
+            last_err = e
+            err_str = str(e)
+            if "503" in err_str or "UNAVAILABLE" in err_str or "quota" in err_str.lower():
+                continue
+            return {"error": err_str}
+    return {"error": str(last_err)}
