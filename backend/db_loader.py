@@ -51,35 +51,39 @@ def load_db() -> list[dict]:
     return items
 
 
-def filter_items(scene: str, level: str, phase: str = "") -> list[dict]:
+def filter_items(scene, level: str, phase: str = "") -> list[dict]:
     """
     依能力領域（domain）和層級篩選適用的檢核項目。
+    scene 可為單一字串或場景字串 list（多場景模式）。
     G. 專案管理基本功 永遠包含（通用底層）。
     層級：A 包含 A+B+C，B 包含 B+C，C 只含 C。
     phase 可選：前期/執行/收尾/通用，不填則全包含。
     排序：重要性（紅>黃>白）→ 被提及次數降序。
     """
+    if isinstance(scene, str):
+        scenes = [scene]
+    else:
+        scenes = list(scene)
+    scene_letters = {s[0] for s in scenes if s}
+
     all_items = load_db()
     min_level = LEVEL_ORDER.get(level, 1)
 
+    seen_seq = set()
     result = []
     for item in all_items:
         domain       = item.get("domain", "")
         item_phase   = item.get("phase", "")
         item_level_v = LEVEL_ORDER.get(item["level"], 1)
 
-        # 能力領域匹配：以場景碼首字母比對 domain 首字母，或 domain 含 G
         domain_letter = domain[0] if domain else ""
-        scene_letter  = scene[0] if scene else ""
         domain_match = (
-            domain_letter == scene_letter
+            domain_letter in scene_letters
             or domain_letter == "G"
-            or (scene_letter and scene.startswith(domain_letter))
         )
 
         level_match = item_level_v >= min_level
 
-        # 階段篩選（有指定才篩，通用永遠包含）
         phase_match = (
             not phase
             or item_phase == phase
@@ -87,9 +91,11 @@ def filter_items(scene: str, level: str, phase: str = "") -> list[dict]:
         )
 
         if domain_match and level_match and phase_match:
-            result.append(item)
+            seq = item.get("seq")
+            if seq not in seen_seq:
+                seen_seq.add(seq)
+                result.append(item)
 
-    # 排序：重要性（紅=3 > 黃=2 > 白=1）→ 被提及次數降序
     result.sort(
         key=lambda x: (
             IMPORTANCE_ORDER.get(x.get("importance", "白"), 1),
@@ -127,11 +133,15 @@ def load_skills() -> dict[str, str]:
     return result
 
 
-def extract_skill_context(scene: str, level: str) -> str:
+def extract_skill_context(scene, level: str) -> str:
     """
-    依場景和層級，從三份 Skill 中萃取最相關的段落，
-    回傳整合後的文字（注入 Gemini prompt 用）。
+    依場景和層級，從三份 Skill 中萃取最相關的段落。
+    scene 可為單一字串或場景字串 list（多場景模式）。
     """
+    if isinstance(scene, str):
+        scenes = [scene]
+    else:
+        scenes = list(scene)
     skills = load_skills()
     parts = []
 
@@ -148,7 +158,7 @@ def extract_skill_context(scene: str, level: str) -> str:
     # ── 生命動能框架：取 TLQ8 活動執行 + TLQ9 新活動規劃前 ──
     assoc_md = skills.get("協會框架", "")
     # 比賽場景加入 TLQ4 策略
-    extra_tlq = ["TLQ4 · 協會策略"] if scene.startswith("C.") else []
+    extra_tlq = ["TLQ4 · 協會策略"] if any(s.startswith("C.") for s in scenes) else []
     assoc_sections = _extract_sections(
         assoc_md,
         targets=["TLQ8 · 活動執行", "TLQ9 · 新活動規劃", "TLQ1 · 臨時任務"] + extra_tlq,
