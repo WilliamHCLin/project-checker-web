@@ -13,7 +13,7 @@ import openpyxl
 
 import gemini_client
 from db_loader import filter_items, detect_scene, extract_skill_context, get_mention_weight
-from config import TC4_THRESHOLD, LEVEL_ORDER
+from config import TC4_THRESHOLD, LEVEL_ORDER, IMPORTANCE_ORDER
 
 
 # --- 文件解析 ---
@@ -21,11 +21,9 @@ from config import TC4_THRESHOLD, LEVEL_ORDER
 def extract_text_from_docx(file_bytes: bytes) -> str:
     doc = DocxDocument(io.BytesIO(file_bytes))
     parts = []
-    # 段落文字
     for p in doc.paragraphs:
         if p.text.strip():
             parts.append(p.text)
-    # 表格文字（逐列合併，以 | 分隔欄位）
     for table in doc.tables:
         for row in table.rows:
             row_text = "  |  ".join(c.text.strip() for c in row.cells if c.text.strip())
@@ -57,61 +55,80 @@ def extract_text(file_bytes: bytes, filename: str) -> str:
         raise ValueError(f"不支援的檔案格式：{suffix}")
 
 
-# --- TC4 評分 ---
+# --- TC4 評分（扣分制）---
+#
+# 起點 100 分。每個被檢核項目（不適用者排除）依重要性有基礎扣分點：
+#   紅 = 3 點、黃 = 2 點、白 = 1 點
+# 再乘以 mention_weight（高頻提到的項目權重更高）。
+#
+# 結果對應扣分比例：
+#   已完成  → 0%（不扣）
+#   部分完成 → 50% 扣
+#   需補件  → 33% 扣
+#   需確認  → 25% 扣
+#   未完成  → 100% 扣
+#   不適用  → 排除（不計入分子與分母）
+#
+# 最終分數 = 100 - (實際扣分總點數 / 最大可能扣分總點數) × 100
+# 這等同於：score = (已得分點數 / 最高可得點數) × 100
 
-# 扣分比例（0 = 不扣，0.5 = 扣一半，1.0 = 全扣）
 DEDUCT_RATIO = {
-    "已達標":   0.0,
     "已完成":   0.0,
-    "部分達標": 0.5,
     "部分完成": 0.5,
-    "未達標":   1.0,
+    "需補件":   1/3,
+    "需確認":   0.25,
     "未完成":   1.0,
-    "需補件":   1.0,
-    "需確認":   1.0,
-    "有問題":   1.0,
-    "缺失資訊": 1.0,
-    "不適用":   None,  # 不計入
+}
+
+# 重要性對應基礎扣分點（影響未完成扣多少）
+IMPORTANCE_WEIGHT = {
+    "紅": 3.0,
+    "黃": 2.0,
+    "白": 1.0,
 }
 
 
 def calculate_tc4_score(items_result: list, db_items: list) -> dict:
-    """
-    100 分往下扣：
-      TC4 = 100 - (Σ 扣分權重) / (Σ 計入項目權重) × 100
-    全部達標 = 100 分；每個未達標項依權重扣分。
-    """
     db_map = {it["seq"]: it for it in db_items}
-    deduct_sum   = 0.0
-    weight_total = 0.0
+    total_max_points = 0.0  # 最大可能扣分點
+    total_deducted   = 0.0  # 實際扣分點
     detail = []
 
     for res in items_result:
         seq    = res.get("seq")
-        result = res.get("result", "未達標")
-        ratio  = DEDUCT_RATIO.get(result)
+        result = res.get("result", "未完成")
 
-        if ratio is None:
-            continue  # 不適用，跳過
+        # 不適用 → 完全排除
+        if result == "不適用":
+            continue
 
         db_item = db_map.get(seq, {})
-        mention = db_item.get("mention_count", 0)
-        weight  = get_mention_weight(mention)
+        importance = db_item.get("importance", "白")
+        mention    = db_item.get("mention_count", 0)
 
-        deduct_sum   += ratio * weight
-        weight_total += weight
+        imp_w  = IMPORTANCE_WEIGHT.get(importance, 1.0)
+        men_w  = get_mention_weight(mention)
+        points = imp_w * men_w           # 此項目最大扣分點
+
+        ratio    = DEDUCT_RATIO.get(result, 1.0)
+        deducted = points * ratio
+
+        total_max_points += points
+        total_deducted   += deducted
+
         detail.append({
-            "seq":    seq,
-            "item":   res.get("item", ""),
-            "result": result,
-            "weight": weight,
-            "deduct": round(ratio * weight, 2),
+            "seq":        seq,
+            "item":       res.get("item", ""),
+            "result":     result,
+            "importance": importance,
+            "max_points": round(points, 2),
+            "deducted":   round(deducted, 2),
         })
 
-    if weight_total == 0:
-        final_score = 100.0
+    if total_max_points == 0:
+        final_score = 0.0
     else:
-        final_score = round(max(0.0, 100.0 - (deduct_sum / weight_total) * 100), 1)
+        final_score = round(100 - (total_deducted / total_max_points) * 100, 1)
 
     return {
         "score":  final_score,
@@ -139,16 +156,6 @@ def run_check(
     check_id  = str(uuid.uuid4())
     timestamp = datetime.now().isoformat()
 
-    # 共用 AI 呼叫參數
-    ai_kwargs = dict(
-        api_key              = gemini_api_key,
-        model_override       = gemini_model,
-        provider             = api_provider,
-        third_party_key      = third_party_key,
-        third_party_model    = third_party_model,
-        third_party_base_url = third_party_base_url,
-    )
-
     # 1. 解析文件
     doc_text = ""
     if pre_extracted:
@@ -156,7 +163,6 @@ def run_check(
     elif file_bytes and filename:
         doc_text = extract_text(file_bytes, filename)
 
-    # 合併學員說明文字
     if context_input.strip():
         context_section = f"【學員說明與背景】\n{context_input.strip()}\n\n"
         doc_text = context_section + doc_text
@@ -165,30 +171,57 @@ def run_check(
 
     # 2. 場景辨識（第一輪 AI）
     if scene_hint:
-        # member 手動指定場景，直接使用
-        scenes = [scene_hint]
+        # 使用者手動指定場景 → 直接用，仍跑關鍵字判斷層級
+        keyword_result = detect_scene(detect_text)
+        scenes = [scene_hint, "G. 專案管理基本功"]
+        if "G. 專案管理基本功" not in scenes:
+            scenes.append("G. 專案管理基本功")
+        level      = keyword_result["level"]
         confidence = 100
+        scene_note = f"手動指定：{scene_hint}"
     else:
-        # 讓 AI 讀完文件，選出最相關的 3 個場景
-        scenes = gemini_client.detect_scenes_ai(detect_text, **ai_kwargs)
-        confidence = 90  # AI 辨識信心值
+        # AI 第一輪：完整閱讀文件，判斷主/次場景 + 層級
+        ai_scene_result = gemini_client.detect_scenes_ai(
+            doc_text              = detect_text,
+            api_key               = gemini_api_key,
+            provider              = api_provider,
+            third_party_key       = third_party_key,
+            third_party_model     = third_party_model,
+            third_party_base_url  = third_party_base_url,
+        )
+        scenes     = ai_scene_result.get("_scenes", [])
+        level      = ai_scene_result.get("level", "B")
+        confidence = 85   # AI 辨識，給固定信心值
+        scene_note = ai_scene_result.get("level_reason", "")
 
-    # 3. 層級判斷（保留關鍵字備援）
-    fallback = detect_scene(detect_text)
-    level    = fallback["level"]
+        # AI 失敗 fallback → 關鍵字比對
+        if not scenes:
+            kw = detect_scene(detect_text)
+            scenes     = [kw["scene"], "G. 專案管理基本功"]
+            level      = kw["level"]
+            confidence = kw["confidence"]
+            scene_note = "AI 辨識失敗，改用關鍵字比對"
 
-    # 4. 篩選檢核項目 + skill context（多場景合併去重）
+    # 主場景（第一個）供顯示用
+    primary_scene = scenes[0] if scenes else "G. 專案管理基本功"
+
+    # 3. 篩選檢核項目 + skill context
     db_items      = filter_items(scenes, level)
     skill_context = extract_skill_context(scenes, level)
 
-    # 5. 第二輪 AI：完整分析
+    # 4. 呼叫 AI 第二輪（逐項檢核）
     ai_result = gemini_client.analyze(
-        doc_text      = doc_text,
-        scenes        = scenes,
-        level         = level,
-        check_items   = db_items,
-        skill_context = skill_context,
-        **ai_kwargs,
+        doc_text             = doc_text,
+        scene                = scenes,
+        level                = level,
+        check_items          = db_items,
+        skill_context        = skill_context,
+        api_key              = gemini_api_key,
+        model_override       = gemini_model,
+        provider             = api_provider,
+        third_party_key      = third_party_key,
+        third_party_model    = third_party_model,
+        third_party_base_url = third_party_base_url,
     )
 
     if "error" in ai_result:
@@ -198,35 +231,23 @@ def run_check(
             "timestamp": timestamp,
         }
 
-    # 6. TC4 評分
+    # 5. TC4 評分（扣分制）
     tc4 = calculate_tc4_score(ai_result.get("items", []), db_items)
 
-    # 7. 把 mention_count 和 weight 合併進每個 item
-    db_map = {it["seq"]: it for it in db_items}
-    items = []
-    for it in ai_result.get("items", []):
-        db_it = db_map.get(it.get("seq"), {})
-        mention = db_it.get("mention_count", 0)
-        weight  = get_mention_weight(mention)
-        items.append({
-            **it,
-            "mention_count": mention,
-            "weight":        weight,
-        })
-
-    # 8. 統計
+    # 6. 統計
+    items = ai_result.get("items", [])
     stats = {r: sum(1 for i in items if i.get("result") == r)
-             for r in ["已達標", "部分達標", "未達標", "不適用", "需補件", "需確認"]}
+             for r in ["已完成", "部分完成", "未完成", "不適用", "需補件", "需確認"]}
 
     return {
         "check_id":          check_id,
         "timestamp":         timestamp,
         "filename":          filename,
         "member_name":       member_name,
-        "scene":             ai_result.get("scene_confirmed", scenes[0] if scenes else ""),
-        "scenes_used":       ai_result.get("scenes_used", scenes),
+        "scene":             ai_result.get("scene_confirmed", primary_scene),
+        "scenes":            scenes,
         "level":             ai_result.get("level_confirmed", level),
-        "scene_note":        ai_result.get("scene_note", ""),
+        "scene_note":        scene_note,
         "auto_confidence":   confidence,
         "score":             tc4["score"],
         "passed":            tc4["passed"],
