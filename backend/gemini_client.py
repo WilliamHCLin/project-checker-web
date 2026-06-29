@@ -405,17 +405,15 @@ def analyze(
     if not effective_key:
         return {"error": "GEMINI_API_KEY 未設定，請填入你的 API Key"}
 
-    FALLBACK_MODELS = [
-        effective_model,
-        "gemini-1.5-flash",
-        "gemini-1.5-flash-8b",
-    ]
+    import time
+    MAX_RETRY = 5
+    RETRY_WAIT = 8  # 秒，每次等 8 秒，5 次共最多等 40 秒撐過冷啟動
     last_err = None
-    for model_try in FALLBACK_MODELS:
+    for attempt in range(1, MAX_RETRY + 1):
         try:
             client = _get_gemini_client(effective_key)
             resp = client.models.generate_content(
-                model=model_try,
+                model=effective_model,
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -427,8 +425,9 @@ def analyze(
         except Exception as e:
             last_err = e
             err_str = str(e)
-            if "503" in err_str or "429" in err_str or "overloaded" in err_str.lower():
-                continue  # 試下一個模型
-            break  # 其他錯誤直接中止
+            if ("503" in err_str or "429" in err_str or "overloaded" in err_str.lower()) and attempt < MAX_RETRY:
+                time.sleep(RETRY_WAIT)
+                continue  # 同模型重試
+            break  # 其他錯誤或已達上限
 
-    return {"error": f"所有模型均失敗：{last_err}"}
+    return {"error": f"Gemini 呼叫失敗（重試 {MAX_RETRY} 次）：{last_err}"}
