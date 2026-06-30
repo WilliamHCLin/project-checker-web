@@ -429,7 +429,7 @@ def analyze(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    max_output_tokens=8192,
+                    max_output_tokens=16000,
                     temperature=0.1,
                 ),
             )
