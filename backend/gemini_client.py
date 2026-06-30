@@ -288,10 +288,15 @@ def build_prompt(doc_text, scene, level, check_items, skill_context):
     IMP_LABEL = {"紅": "[底線]", "黃": "[核心]", "白": "[一般]"}
 
     # 分批：底線+核心優先，一般最後
-    red_items = [it for it in check_items if it.get("importance") == "紅"]
+    red_items    = [it for it in check_items if it.get("importance") == "紅"]
     yellow_items = [it for it in check_items if it.get("importance") == "黃"]
-    white_items = [it for it in check_items if it.get("importance") == "白"]
-    ordered_items = red_items + yellow_items + white_items
+    white_items  = [it for it in check_items if it.get("importance") == "白"]
+
+    # Gemini 8192 token 輸出上限保護：紅全取、黃最多30、白最多20
+    MAX_YELLOW = 30
+    MAX_WHITE  = 20
+    ordered_items = red_items + yellow_items[:MAX_YELLOW] + white_items[:MAX_WHITE]
+    truncated_count = (len(yellow_items) - min(len(yellow_items), MAX_YELLOW)) +                       (len(white_items)  - min(len(white_items),  MAX_WHITE))
 
     items_text = ""
     for it in ordered_items:
@@ -352,7 +357,7 @@ def build_prompt(doc_text, scene, level, check_items, skill_context):
         "能力領域：" + str(scene) + "\n"
         "風險層級：" + str(level) + " 級\n"
         "（A 級=高風險對外/未成年/首次；B 級=中風險有家長師資；C 級=低風險例行）\n\n"
-        "【待檢核項目（共 " + str(len(ordered_items)) + " 項，底線→核心→一般排列）】\n"
+        "【待檢核項目（共 " + str(len(ordered_items)) + " 項（紅全取/黃限30/白限20），底線→核心→一般排列）】\n"
         "⚠️ 請依序完成所有底線項目的判定，再處理核心，最後才是一般項目。\n"
         + items_text + "\n\n"
         "【Member 上傳的規劃文件（完整內容）】\n"
